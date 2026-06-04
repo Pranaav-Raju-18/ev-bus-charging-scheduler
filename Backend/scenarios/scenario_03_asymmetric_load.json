@@ -1,0 +1,95 @@
+{
+  "scenario_id": "scenario_03_asymmetric_load",
+  "scenario_name": "Asymmetric Load",
+  "scenario_description": "10 buses travel from Bengaluru to Kochi with 15 minute spacing, while only 4 buses travel from Kochi to Bengaluru. This tests how the scheduler handles uneven traffic across directions.",
+  "optimization": {
+    "consider_individual_scenario_weight": false,
+    "weights": {}
+  },
+  "buses": [
+    {
+      "bus_id": "bus-BK-01",
+      "operator_id": "kpn",
+      "route_id": "route_01",
+      "scheduled_departure_time": "19:00"
+    },
+    {
+      "bus_id": "bus-BK-02",
+      "operator_id": "freshbus",
+      "route_id": "route_01",
+      "scheduled_departure_time": "19:15"
+    },
+    {
+      "bus_id": "bus-BK-03",
+      "operator_id": "flixbus",
+      "route_id": "route_01",
+      "scheduled_departure_time": "19:30"
+    },
+    {
+      "bus_id": "bus-BK-04",
+      "operator_id": "kpn",
+      "route_id": "route_01",
+      "scheduled_departure_time": "19:45"
+    },
+    {
+      "bus_id": "bus-BK-05",
+      "operator_id": "freshbus",
+      "route_id": "route_01",
+      "scheduled_departure_time": "20:00"
+    },
+    {
+      "bus_id": "bus-BK-06",
+      "operator_id": "flixbus",
+      "route_id": "route_01",
+      "scheduled_departure_time": "20:15"
+    },
+    {
+      "bus_id": "bus-BK-07",
+      "operator_id": "kpn",
+      "route_id": "route_01",
+      "scheduled_departure_time": "20:30"
+    },
+    {
+      "bus_id": "bus-BK-08",
+      "operator_id": "freshbus",
+      "route_id": "route_01",
+      "scheduled_departure_time": "20:45"
+    },
+    {
+      "bus_id": "bus-BK-09",
+      "operator_id": "flixbus",
+      "route_id": "route_01",
+      "scheduled_departure_time": "21:00"
+    },
+    {
+      "bus_id": "bus-BK-10",
+      "operator_id": "kpn",
+      "route_id": "route_01",
+      "scheduled_departure_time": "21:15"
+    },
+    {
+      "bus_id": "bus-KB-01",
+      "operator_id": "freshbus",
+      "route_id": "route_02",
+      "scheduled_departure_time": "19:00"
+    },
+    {
+      "bus_id": "bus-KB-02",
+      "operator_id": "flixbus",
+      "route_id": "route_02",
+      "scheduled_departure_time": "19:35"
+    },
+    {
+      "bus_id": "bus-KB-03",
+      "operator_id": "kpn",
+      "route_id": "route_02",
+      "scheduled_departure_time": "20:10"
+    },
+    {
+      "bus_id": "bus-KB-04",
+      "operator_id": "freshbus",
+      "route_id": "route_02",
+      "scheduled_departure_time": "20:45"
+    }
+  ]
+}

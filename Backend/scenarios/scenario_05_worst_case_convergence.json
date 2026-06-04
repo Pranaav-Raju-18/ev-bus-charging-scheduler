@@ -1,0 +1,131 @@
+{
+  "scenario_id": "scenario_05_worst_case_convergence",
+  "scenario_name": "Worst Case Convergence",
+  "scenario_description": "All 20 buses are dispatched within a 72-minute window every 8 minutes from both ends. By the time buses reach the inner stations B and C, they collide, creating maximum charging contention.",
+  "optimization": {
+    "consider_individual_scenario_weight": false,
+    "weights": {}
+  },
+  "buses": [
+    {
+      "bus_id": "bus-BK-01",
+      "operator_id": "kpn",
+      "route_id": "route_01",
+      "scheduled_departure_time": "19:00"
+    },
+    {
+      "bus_id": "bus-BK-02",
+      "operator_id": "freshbus",
+      "route_id": "route_01",
+      "scheduled_departure_time": "19:08"
+    },
+    {
+      "bus_id": "bus-BK-03",
+      "operator_id": "flixbus",
+      "route_id": "route_01",
+      "scheduled_departure_time": "19:16"
+    },
+    {
+      "bus_id": "bus-BK-04",
+      "operator_id": "kpn",
+      "route_id": "route_01",
+      "scheduled_departure_time": "19:24"
+    },
+    {
+      "bus_id": "bus-BK-05",
+      "operator_id": "freshbus",
+      "route_id": "route_01",
+      "scheduled_departure_time": "19:32"
+    },
+    {
+      "bus_id": "bus-BK-06",
+      "operator_id": "flixbus",
+      "route_id": "route_01",
+      "scheduled_departure_time": "19:40"
+    },
+    {
+      "bus_id": "bus-BK-07",
+      "operator_id": "kpn",
+      "route_id": "route_01",
+      "scheduled_departure_time": "19:48"
+    },
+    {
+      "bus_id": "bus-BK-08",
+      "operator_id": "freshbus",
+      "route_id": "route_01",
+      "scheduled_departure_time": "19:56"
+    },
+    {
+      "bus_id": "bus-BK-09",
+      "operator_id": "flixbus",
+      "route_id": "route_01",
+      "scheduled_departure_time": "20:04"
+    },
+    {
+      "bus_id": "bus-BK-10",
+      "operator_id": "kpn",
+      "route_id": "route_01",
+      "scheduled_departure_time": "20:12"
+    },
+    {
+      "bus_id": "bus-KB-01",
+      "operator_id": "freshbus",
+      "route_id": "route_02",
+      "scheduled_departure_time": "19:00"
+    },
+    {
+      "bus_id": "bus-KB-02",
+      "operator_id": "flixbus",
+      "route_id": "route_02",
+      "scheduled_departure_time": "19:08"
+    },
+    {
+      "bus_id": "bus-KB-03",
+      "operator_id": "kpn",
+      "route_id": "route_02",
+      "scheduled_departure_time": "19:16"
+    },
+    {
+      "bus_id": "bus-KB-04",
+      "operator_id": "freshbus",
+      "route_id": "route_02",
+      "scheduled_departure_time": "19:24"
+    },
+    {
+      "bus_id": "bus-KB-05",
+      "operator_id": "flixbus",
+      "route_id": "route_02",
+      "scheduled_departure_time": "19:32"
+    },
+    {
+      "bus_id": "bus-KB-06",
+      "operator_id": "kpn",
+      "route_id": "route_02",
+      "scheduled_departure_time": "19:40"
+    },
+    {
+      "bus_id": "bus-KB-07",
+      "operator_id": "freshbus",
+      "route_id": "route_02",
+      "scheduled_departure_time": "19:48"
+    },
+    {
+      "bus_id": "bus-KB-08",
+      "operator_id": "flixbus",
+      "route_id": "route_02",
+      "scheduled_departure_time": "19:56"
+    },
+    {
+      "bus_id": "bus-KB-09",
+      "operator_id": "kpn",
+      "route_id": "route_02",
+      "scheduled_departure_time": "20:04"
+    },
+    {
+      "bus_id": "bus-KB-10",
+      "operator_id": "freshbus",
+      "route_id": "route_02",
+      "scheduled_departure_time": "20:12"
+    }
+  ]
+}

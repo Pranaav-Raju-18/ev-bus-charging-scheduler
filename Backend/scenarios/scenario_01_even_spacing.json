@@ -1,0 +1,131 @@
+{
+    "scenario_id": "scenario_01_even_spacing",
+    "scenario_name": "Even Spacing",
+    "scenario_description": "Baseline scenario where buses depart every 15 minutes in each direction starting from 19:00. This validates the scheduler under normal balanced load with low-to-medium charger contention.",
+    "optimization": {
+        "consider_individual_scenario_weight": false,
+        "weights": {}
+    },
+    "buses": [
+        {
+        "bus_id": "bus-BK-01",
+        "operator_id": "kpn",
+        "route_id": "route_01",
+        "scheduled_departure_time": "19:00"
+        },
+        {
+        "bus_id": "bus-BK-02",
+        "operator_id": "freshbus",
+        "route_id": "route_01",
+        "scheduled_departure_time": "19:15"
+        },
+        {
+        "bus_id": "bus-BK-03",
+        "operator_id": "flixbus",
+        "route_id": "route_01",
+        "scheduled_departure_time": "19:30"
+        },
+        {
+        "bus_id": "bus-BK-04",
+        "operator_id": "kpn",
+        "route_id": "route_01",
+        "scheduled_departure_time": "19:45"
+        },
+        {
+        "bus_id": "bus-BK-05",
+        "operator_id": "freshbus",
+        "route_id": "route_01",
+        "scheduled_departure_time": "20:00"
+        },
+        {
+        "bus_id": "bus-BK-06",
+        "operator_id": "flixbus",
+        "route_id": "route_01",
+        "scheduled_departure_time": "20:15"
+        },
+        {
+        "bus_id": "bus-BK-07",
+        "operator_id": "kpn",
+        "route_id": "route_01",
+        "scheduled_departure_time": "20:30"
+        },
+        {
+        "bus_id": "bus-BK-08",
+        "operator_id": "freshbus",
+        "route_id": "route_01",
+        "scheduled_departure_time": "20:45"
+        },
+        {
+        "bus_id": "bus-BK-09",
+        "operator_id": "flixbus",
+        "route_id": "route_01",
+        "scheduled_departure_time": "21:00"
+        },
+        {
+        "bus_id": "bus-BK-10",
+        "operator_id": "kpn",
+        "route_id": "route_01",
+        "scheduled_departure_time": "21:15"
+        },
+        {
+        "bus_id": "bus-KB-01",
+        "operator_id": "freshbus",
+        "route_id": "route_02",
+        "scheduled_departure_time": "19:00"
+        },
+        {
+        "bus_id": "bus-KB-02",
+        "operator_id": "flixbus",
+        "route_id": "route_02",
+        "scheduled_departure_time": "19:15"
+        },
+        {
+        "bus_id": "bus-KB-03",
+        "operator_id": "kpn",
+        "route_id": "route_02",
+        "scheduled_departure_time": "19:30"
+        },
+        {
+        "bus_id": "bus-KB-04",
+        "operator_id": "freshbus",
+        "route_id": "route_02",
+        "scheduled_departure_time": "19:45"
+        },
+        {
+        "bus_id": "bus-KB-05",
+        "operator_id": "flixbus",
+        "route_id": "route_02",
+        "scheduled_departure_time": "20:00"
+        },
+        {
+        "bus_id": "bus-KB-06",
+        "operator_id": "kpn",
+        "route_id": "route_02",
+        "scheduled_departure_time": "20:15"
+        },
+        {
+        "bus_id": "bus-KB-07",
+        "operator_id": "freshbus",
+        "route_id": "route_02",
+        "scheduled_departure_time": "20:30"
+        },
+        {
+        "bus_id": "bus-KB-08",
+        "operator_id": "flixbus",
+        "route_id": "route_02",
+        "scheduled_departure_time": "20:45"
+        },
+        {
+        "bus_id": "bus-KB-09",
+        "operator_id": "kpn",
+        "route_id": "route_02",
+        "scheduled_departure_time": "21:00"
+        },
+        {
+        "bus_id": "bus-KB-10",
+        "operator_id": "freshbus",
+        "route_id": "route_02",
+        "scheduled_departure_time": "21:15"
+        }
+    ]
+}
