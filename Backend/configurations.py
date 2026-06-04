@@ -128,11 +128,20 @@ OPERATORS_CONFIG =[
 ]
 
 OPERATIONAL_FAILURE_SETTINGS = {
-    "include_operational_failures": True,
+    "include_operational_failures": False,
   }
 
 OPERATIONAL_FAILURES = [
-      {
+    {
+    "operational_failure_id": "failure-001",
+    "type": "STATION_CAPACITY_REDUCTION",
+    "station_id": "B",
+    "start_time": "20:00",
+    "end_time": "22:00",
+    "available_chargers": 0,
+    "reason": "Only 1 charger is available at Station B due to maintenance"
+  },
+  {
     "operational_failure_id": "failure-002",
     "type": "CHARGER_DOWN",
     "station_id": "D",
@@ -140,8 +149,18 @@ OPERATIONAL_FAILURES = [
     "start_time": "02:00",
     "end_time": "03:30",
     "reason": "Specific charger D-1 is down due to communication failure"
-  }
-]
+  },
+  {
+    "operational_failure_id": "failure-003",
+    "type": "SLOW_CHARGING",
+    "station_id": "D",
+    "start_time": "21:00",
+    "end_time": "23:00",
+    "charging_duration_minutes": 40,
+    "affected_chargers": 1,
+    "reason": "Voltage drop at Station D increases charging time"
+  }]
+
 
 
 REOPTIMIZATION_CONFIG = {
