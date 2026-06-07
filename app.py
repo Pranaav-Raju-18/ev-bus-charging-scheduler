@@ -271,7 +271,78 @@ st.markdown(
             box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
         }
 
-        </style>
+        
+        .optimizer-loader-card {
+            background-color: #F8F8F8;
+            border-left: 6px solid #F5B400;
+            border-radius: 12px;
+            padding: 1rem 1.2rem;
+            margin: 0.8rem 0 1rem 0;
+            box-shadow: 0 1px 5px rgba(0, 0, 0, 0.08);
+        }
+
+        .optimizer-loader-title {
+            color: #1F1F1F;
+            font-size: 1rem;
+            font-weight: 900;
+            margin-bottom: 0.45rem;
+        }
+
+        .optimizer-loader-text {
+            color: #444444;
+            font-size: 0.9rem;
+            font-weight: 650;
+            margin-bottom: 0.75rem;
+        }
+
+        .bus-track {
+            position: relative;
+            height: 36px;
+            border-bottom: 3px solid #1F1F1F;
+            overflow: hidden;
+        }
+
+        .bus-track::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 7px;
+            height: 4px;
+            background: repeating-linear-gradient(
+                to right,
+                #1F1F1F 0 26px,
+                transparent 26px 42px
+            );
+            opacity: 0.9;
+        }
+
+        .bus-icon {
+            position: absolute;
+            left: -52px;
+            bottom: 0;
+            font-size: 1.7rem;
+            animation: busMove 60s linear 1 forwards;
+        }
+
+        .charger-node {
+            position: absolute;
+            right: 4px;
+            bottom: -2px;
+            font-size: 1.75rem;
+        }
+
+        @keyframes busMove {
+            0% {
+                left: -52px;
+            }
+
+            100% {
+                left: calc(100% - 38px);
+            }
+        }
+
+    </style>
     """,
     unsafe_allow_html=True,
 )
@@ -410,6 +481,27 @@ def build_cached_excel_report(result) -> bytes:
         result (dict): Final scheduler result dictionary.
     """
     return build_excel_report(result)
+
+
+def render_optimizer_loader(message) -> None:
+    """Render an animated bus loader while CP-SAT is running.
+
+    Args:
+        message (str): Short status message shown above the animation.
+    """
+    st.markdown(
+        f"""
+        <div class="optimizer-loader-card">
+            <div class="optimizer-loader-title">Running optimizer</div>
+            <div class="optimizer-loader-text">{message}</div>
+            <div class="bus-track">
+                <div class="bus-icon">🚌</div>
+                <div class="charger-node">🔌</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def get_dynamic_failures() -> list[dict]:
@@ -617,6 +709,17 @@ run_scheduler = st.sidebar.button(
     use_container_width=True,
 )
 
+if run_scheduler:
+    st.session_state.pop("scheduler_result", None)
+    st.session_state.pop("scheduler_run_key", None)
+
+    for tab in [
+        "summary_tab",
+        "station_order_tab",
+        "other_metrics_tab",
+    ]:
+        st.empty()
+
 
 weights_changed = is_weight_changed(
     ui_weights,
@@ -679,6 +782,10 @@ input_data_tab, summary_tab, station_order_tab, other_metrics_tab = st.tabs([
     "Station Charging Orders",
     "Other Metrics",
 ])
+
+summary_loading_placeholder = summary_tab.empty()
+station_loading_placeholder = station_order_tab.empty()
+metrics_loading_placeholder = other_metrics_tab.empty()
 
 
 with input_data_tab:
@@ -766,12 +873,29 @@ reoptimization_enabled = REOPTIMIZATION_CONFIG.get(
 )
 
 if should_run_scheduler:
+    optimizer_message = summary_loading_placeholder
+    st.session_state["scheduler_is_running"] = True
+
+    with station_loading_placeholder.container():
+        st.info(
+            "Station charging orders are being recalculated for the selected scenario."
+        )
+
+    with metrics_loading_placeholder.container():
+        st.info(
+            "Other metrics and the Excel download will appear after the fresh optimization run completes."
+        )
+
     try:
         if reoptimization_enabled and dynamic_failures:
-            with st.status(
+            with optimizer_message.status(
                 "Event-driven CP-SAT run in progress...",
                 expanded=True,
             ) as run_status:
+                render_optimizer_loader(
+                    "Building the initial CP-SAT schedule. Dynamic failures will be injected when their configured time is reached."
+                )
+
                 st.write(
                     "Phase 1: Building the initial CP-SAT schedule without dynamic failures."
                 )
@@ -815,9 +939,11 @@ if should_run_scheduler:
                         expanded=True,
                     )
         else:
-            with st.spinner(
-                f"Running optimizer... maximum solve time is {max_solve_time} seconds."
-            ):
+            with optimizer_message:
+                render_optimizer_loader(
+                    f"CP-SAT is solving the selected scenario. Maximum solve time is {max_solve_time} seconds."
+                )
+
                 scheduler = BusChargingScheduler(
                     scenario_path=str(selected_scenario_path),
                     ui_weights=ui_weights,
@@ -829,8 +955,17 @@ if should_run_scheduler:
 
         st.session_state["scheduler_result"] = result
         st.session_state["scheduler_run_key"] = current_run_key
+        st.session_state["scheduler_is_running"] = False
+        optimizer_message.empty()
+        summary_loading_placeholder.empty()
+        station_loading_placeholder.empty()
+        metrics_loading_placeholder.empty()
 
     except ValueError as error:
+        st.session_state["scheduler_is_running"] = False
+        optimizer_message.empty()
+        station_loading_placeholder.empty()
+        metrics_loading_placeholder.empty()
         st.error(str(error))
         st.stop()
 else:
