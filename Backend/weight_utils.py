@@ -1,12 +1,10 @@
-"""Optimization weight resolution for global, scenario, and UI overrides."""
-
 from Backend.configurations import OPTIMIZATION_WEIGHTS
 
 
-class WeightUtilsMixin:
-    """Resolve and validate optimization weights from config, scenario, and UI inputs."""
-
-    def _get_weights(self):
+class WeightUtilities:
+    def _get_weights(self) -> object:
+        """Resolve or apply optimization weight values.
+        """
         optimization = self.scenario.get("optimization", {})
 
         use_scenario_weights = optimization.get(
@@ -32,7 +30,13 @@ class WeightUtilsMixin:
             for weight_key, weight_value in weights.items()
         }
 
-    def _validate_weight_keys(self, weights, source_name):
+    def _validate_weight_keys(self, weights, source_name) -> None:
+        """Validate input data before optimization.
+        
+        Args:
+            weights (_type_): Weights used by this function.
+            source_name (_type_): Source name used by this function.
+        """
         unknown_weight_keys = set(weights) - set(OPTIMIZATION_WEIGHTS)
 
         if unknown_weight_keys:
@@ -42,12 +46,25 @@ class WeightUtilsMixin:
                 "Add the weight to OPTIMIZATION_WEIGHTS first if it should be configurable."
             )
 
-    def _validate_weights(self, weights):
+    def _validate_weights(self, weights) -> None:
+        """Validate input data before optimization.
+        
+        Args:
+            weights (_type_): Weights used by this function.
+        """
         for weight_key, weight_value in weights.items():
             if float(weight_value) < 0:
                 raise ValueError(
                     f"Optimization weight cannot be negative: {weight_key}"
                 )
 
-    def _weight(self, weight_name, default_value=0):
-        return int(round(self.weights.get(weight_name, default_value) * 100))
+    def _weight(self, weight_name, default_value=0) -> int:
+        """Resolve or apply optimization weight values.
+        
+        Args:
+            weight_name (str): Name of the optimization weight.
+            default_value (_type_, optional): Default value used by this function. Defaults to 0.
+        """
+        return int(
+            round(self.weights.get(weight_name, default_value) * 100)
+        )

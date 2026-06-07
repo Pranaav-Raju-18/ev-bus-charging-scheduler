@@ -1,14 +1,15 @@
-"""CP-SAT model builder for charging plans, station capacity, and weighted optimization objectives."""
-
 from itertools import combinations
 
-from Backend.configurations import BUS_CONFIG, CHARGER_CONFIG
+from Backend.configurations import (
+    CHARGER_CONFIG,
+    BUS_CONFIG,
+)
 
 
-class SolverModelMixin:
-    """Build CP-SAT variables, constraints, intervals, and optimization objectives."""
-
-    def _build_model(self):
+class SolverModelBuilder:
+    def _build_model(self) -> None:
+        """Handle build model logic.
+        """
         for bus in self.scenario["buses"]:
             self._validate_bus(bus)
             self._create_bus_constraints(bus)
@@ -19,7 +20,10 @@ class SolverModelMixin:
         self._add_additional_resource_constraints()
         self._add_objective()
 
-    def _add_fixed_schedule_constraints(self):
+
+    def _add_fixed_schedule_constraints(self) -> None:
+        """Add a CP-SAT constraint to the model.
+        """
         fixed_schedule = getattr(self, "fixed_schedule", {})
 
         if not fixed_schedule:
@@ -54,7 +58,7 @@ class SolverModelMixin:
             min_future_start = fixed.get("min_future_start_minute")
 
             if min_future_start is not None:
-                for event in selected_plan["events"][len(fixed_events) :]:
+                for event in selected_plan["events"][len(fixed_events):]:
                     self.model.Add(event["start"] >= min_future_start)
 
             final_arrival = fixed.get("final_arrival_minute")
@@ -62,7 +66,13 @@ class SolverModelMixin:
             if final_arrival is not None:
                 self.model.Add(self.final_arrival_vars[bus_id] == final_arrival)
 
-    def _matching_fixed_plan(self, bus_id, fixed_plan):
+    def _matching_fixed_plan(self, bus_id, fixed_plan) -> object:
+        """Build or evaluate valid charging plans.
+        
+        Args:
+            bus_id (str): Unique bus identifier.
+            fixed_plan (_type_): Fixed plan used by this function.
+        """
         fixed_plan_key = tuple(fixed_plan)
 
         for plan in self.bus_plan_meta[bus_id]:
@@ -71,7 +81,12 @@ class SolverModelMixin:
 
         return None
 
-    def _create_bus_constraints(self, bus):
+    def _create_bus_constraints(self, bus) -> None:
+        """Add a CP-SAT constraint to the model.
+        
+        Args:
+            bus (dict): Bus input or output dictionary.
+        """
         bus_id = bus["bus_id"]
         route = self.routes[bus["route_id"]]
         departure = self._time_to_minutes(bus["scheduled_departure_time"])
@@ -144,17 +159,15 @@ class SolverModelMixin:
                     plan_var=plan_var,
                 )
 
-                events.append(
-                    {
-                        "station_id": station_id,
-                        "from_station": previous_station,
-                        "travel_time": travel_time,
-                        "start": start,
-                        "end": end,
-                        "wait": wait,
-                        "charging_modes": charging_modes,
-                    }
-                )
+                events.append({
+                    "station_id": station_id,
+                    "from_station": previous_station,
+                    "travel_time": travel_time,
+                    "start": start,
+                    "end": end,
+                    "wait": wait,
+                    "charging_modes": charging_modes,
+                })
 
                 previous_station = station_id
                 previous_time = end
@@ -171,13 +184,13 @@ class SolverModelMixin:
                 route["station_sequence"][-1],
             )
 
-            self.model.Add(arrival == previous_time + final_travel_time).OnlyEnforceIf(
-                plan_var
-            )
+            self.model.Add(
+                arrival == previous_time + final_travel_time
+            ).OnlyEnforceIf(plan_var)
 
-            self.model.Add(self.final_arrival_vars[bus_id] == arrival).OnlyEnforceIf(
-                plan_var
-            )
+            self.model.Add(
+                self.final_arrival_vars[bus_id] == arrival
+            ).OnlyEnforceIf(plan_var)
 
             plan_wait_total = self.model.NewIntVar(
                 0,
@@ -199,13 +212,11 @@ class SolverModelMixin:
             self.model.Add(plan_charge_count == 0).OnlyEnforceIf(plan_var.Not())
             plan_charge_counts.append(plan_charge_count)
 
-            self.bus_plan_meta[bus_id].append(
-                {
-                    "plan": plan,
-                    "plan_var": plan_var,
-                    "events": events,
-                }
-            )
+            self.bus_plan_meta[bus_id].append({
+                "plan": plan,
+                "plan_var": plan_var,
+                "events": events,
+            })
 
         self.model.AddExactlyOne(plan_vars)
 
@@ -215,7 +226,9 @@ class SolverModelMixin:
             f"total_wait_{bus_id}",
         )
 
-        self.model.Add(self.bus_wait_vars[bus_id] == sum(plan_wait_totals))
+        self.model.Add(
+            self.bus_wait_vars[bus_id] == sum(plan_wait_totals)
+        )
 
         self.bus_charge_count_vars[bus_id] = self.model.NewIntVar(
             0,
@@ -223,7 +236,9 @@ class SolverModelMixin:
             f"total_charge_count_{bus_id}",
         )
 
-        self.model.Add(self.bus_charge_count_vars[bus_id] == sum(plan_charge_counts))
+        self.model.Add(
+            self.bus_charge_count_vars[bus_id] == sum(plan_charge_counts)
+        )
 
         route_distance = self._route_distance(route)
 
@@ -250,15 +265,22 @@ class SolverModelMixin:
         start,
         end,
         plan_var,
-    ):
+    ) -> object:
+        """Create or process CP-SAT charging intervals.
+        
+        Args:
+            bus_id (str): Unique bus identifier.
+            plan_index (_type_): Plan index used by this function.
+            station_id (str): Charging station identifier.
+            start (_type_): Start used by this function.
+            end (_type_): End used by this function.
+            plan_var (_type_): Plan var used by this function.
+        """
         mode_definitions = self._charging_mode_definitions(station_id)
         mode_vars = []
         charging_modes = []
 
-        if (
-            len(mode_definitions) == 1
-            and mode_definitions[0]["mode_type"] == "NORMAL_ALL_TIME"
-        ):
+        if len(mode_definitions) == 1 and mode_definitions[0]["mode_type"] == "NORMAL_ALL_TIME":
             mode = mode_definitions[0]
 
             interval = self.model.NewOptionalIntervalVar(
@@ -271,17 +293,15 @@ class SolverModelMixin:
 
             self.station_intervals[station_id].append((interval, 1))
 
-            return [
-                {
-                    "mode_var": plan_var,
-                    "mode_type": "NORMAL",
-                    "operational_failure_id": None,
-                    "duration_minutes": mode["duration_minutes"],
-                    "window_start": None,
-                    "window_end": None,
-                    "reason": None,
-                }
-            ]
+            return [{
+                "mode_var": plan_var,
+                "mode_type": "NORMAL",
+                "operational_failure_id": None,
+                "duration_minutes": mode["duration_minutes"],
+                "window_start": None,
+                "window_end": None,
+                "reason": None,
+            }]
 
         for mode_index, mode in enumerate(mode_definitions):
             mode_var = self.model.NewBoolVar(
@@ -292,11 +312,13 @@ class SolverModelMixin:
 
             self.model.AddImplication(mode_var, plan_var)
 
-            self.model.Add(start >= mode["window_start_minute"]).OnlyEnforceIf(mode_var)
+            self.model.Add(
+                start >= mode["window_start_minute"]
+            ).OnlyEnforceIf(mode_var)
 
-            self.model.Add(start <= mode["window_end_minute"] - 1).OnlyEnforceIf(
-                mode_var
-            )
+            self.model.Add(
+                start <= mode["window_end_minute"] - 1
+            ).OnlyEnforceIf(mode_var)
 
             interval = self.model.NewOptionalIntervalVar(
                 start,
@@ -309,49 +331,48 @@ class SolverModelMixin:
             self.station_intervals[station_id].append((interval, 1))
 
             if mode["resource_key"]:
-                self.additional_resource_intervals[mode["resource_key"]]["capacity"] = (
-                    mode["resource_capacity"]
+                self.additional_resource_intervals[mode["resource_key"]]["capacity"] = mode[
+                    "resource_capacity"
+                ]
+
+                self.additional_resource_intervals[mode["resource_key"]]["intervals"].append(
+                    (interval, 1)
                 )
 
-                self.additional_resource_intervals[mode["resource_key"]][
-                    "intervals"
-                ].append((interval, 1))
-
-            charging_modes.append(
-                {
-                    "mode_var": mode_var,
-                    "mode_type": mode["mode_type"],
-                    "operational_failure_id": mode.get("operational_failure_id"),
-                    "duration_minutes": mode["duration_minutes"],
-                    "window_start": self._minutes_to_time(mode["window_start_minute"]),
-                    "window_end": (
-                        self._minutes_to_time(mode["window_end_minute"])
-                        if mode["window_end_minute"] < self.horizon
-                        else None
-                    ),
-                    "reason": mode.get("reason"),
-                }
-            )
+            charging_modes.append({
+                "mode_var": mode_var,
+                "mode_type": mode["mode_type"],
+                "operational_failure_id": mode.get("operational_failure_id"),
+                "duration_minutes": mode["duration_minutes"],
+                "window_start": self._minutes_to_time(mode["window_start_minute"]),
+                "window_end": self._minutes_to_time(mode["window_end_minute"])
+                if mode["window_end_minute"] < self.horizon
+                else None,
+                "reason": mode.get("reason"),
+            })
 
         self.model.Add(sum(mode_vars) == plan_var)
 
         return charging_modes
 
-    def _charging_mode_definitions(self, station_id):
+    def _charging_mode_definitions(self, station_id) -> object:
+        """Handle charging mode definitions logic.
+        
+        Args:
+            station_id (str): Charging station identifier.
+        """
         normal_duration = self._normal_charging_time()
         slow_failures = self._slow_charging_operational_failures(station_id)
 
         if not slow_failures:
-            return [
-                {
-                    "mode_type": "NORMAL_ALL_TIME",
-                    "duration_minutes": normal_duration,
-                    "window_start_minute": 0,
-                    "window_end_minute": self.horizon,
-                    "resource_key": None,
-                    "resource_capacity": None,
-                }
-            ]
+            return [{
+                "mode_type": "NORMAL_ALL_TIME",
+                "duration_minutes": normal_duration,
+                "window_start_minute": 0,
+                "window_end_minute": self.horizon,
+                "resource_key": None,
+                "resource_capacity": None,
+            }]
 
         station_charger_count = self.stations[station_id]["charger_count"]
         mode_definitions = []
@@ -362,18 +383,16 @@ class SolverModelMixin:
             start_minute, end_minute = self._failure_window_minutes(failure)
 
             if cursor < start_minute:
-                mode_definitions.append(
-                    {
-                        "mode_type": "NORMAL",
-                        "duration_minutes": normal_duration,
-                        "window_start_minute": cursor,
-                        "window_end_minute": start_minute,
-                        "resource_key": None,
-                        "resource_capacity": None,
-                        "operational_failure_id": None,
-                        "reason": None,
-                    }
-                )
+                mode_definitions.append({
+                    "mode_type": "NORMAL",
+                    "duration_minutes": normal_duration,
+                    "window_start_minute": cursor,
+                    "window_end_minute": start_minute,
+                    "resource_key": None,
+                    "resource_capacity": None,
+                    "operational_failure_id": None,
+                    "reason": None,
+                })
 
             affected_chargers = min(
                 failure.get("affected_chargers", station_charger_count),
@@ -382,57 +401,54 @@ class SolverModelMixin:
 
             normal_chargers_available = station_charger_count - affected_chargers
 
-            slow_duration = failure["charging_duration_minutes"] + CHARGER_CONFIG.get(
-                "charger_setup_duration_minutes", 0
+            slow_duration = (
+                failure["charging_duration_minutes"]
+                + CHARGER_CONFIG.get("charger_setup_duration_minutes", 0)
             )
 
             if normal_chargers_available > 0:
-                mode_definitions.append(
-                    {
-                        "mode_type": "NORMAL_DURING_SLOW_CHARGING",
-                        "duration_minutes": normal_duration,
-                        "window_start_minute": start_minute,
-                        "window_end_minute": end_minute,
-                        "resource_key": (station_id, failure_id, "normal_chargers"),
-                        "resource_capacity": normal_chargers_available,
-                        "operational_failure_id": failure_id,
-                        "reason": failure.get("reason"),
-                    }
-                )
+                mode_definitions.append({
+                    "mode_type": "NORMAL_DURING_SLOW_CHARGING",
+                    "duration_minutes": normal_duration,
+                    "window_start_minute": start_minute,
+                    "window_end_minute": end_minute,
+                    "resource_key": (station_id, failure_id, "normal_chargers"),
+                    "resource_capacity": normal_chargers_available,
+                    "operational_failure_id": failure_id,
+                    "reason": failure.get("reason"),
+                })
 
             if affected_chargers > 0:
-                mode_definitions.append(
-                    {
-                        "mode_type": "SLOW_CHARGING",
-                        "duration_minutes": slow_duration,
-                        "window_start_minute": start_minute,
-                        "window_end_minute": end_minute,
-                        "resource_key": (station_id, failure_id, "slow_chargers"),
-                        "resource_capacity": affected_chargers,
-                        "operational_failure_id": failure_id,
-                        "reason": failure.get("reason"),
-                    }
-                )
+                mode_definitions.append({
+                    "mode_type": "SLOW_CHARGING",
+                    "duration_minutes": slow_duration,
+                    "window_start_minute": start_minute,
+                    "window_end_minute": end_minute,
+                    "resource_key": (station_id, failure_id, "slow_chargers"),
+                    "resource_capacity": affected_chargers,
+                    "operational_failure_id": failure_id,
+                    "reason": failure.get("reason"),
+                })
 
             cursor = max(cursor, end_minute)
 
         if cursor < self.horizon:
-            mode_definitions.append(
-                {
-                    "mode_type": "NORMAL",
-                    "duration_minutes": normal_duration,
-                    "window_start_minute": cursor,
-                    "window_end_minute": self.horizon,
-                    "resource_key": None,
-                    "resource_capacity": None,
-                    "operational_failure_id": None,
-                    "reason": None,
-                }
-            )
+            mode_definitions.append({
+                "mode_type": "NORMAL",
+                "duration_minutes": normal_duration,
+                "window_start_minute": cursor,
+                "window_end_minute": self.horizon,
+                "resource_key": None,
+                "resource_capacity": None,
+                "operational_failure_id": None,
+                "reason": None,
+            })
 
         return mode_definitions
 
-    def _add_capacity_blocking_operational_failures(self):
+    def _add_capacity_blocking_operational_failures(self) -> None:
+        """Apply operational failure logic to the schedule.
+        """
         for failure in self._operational_failures():
             failure_type = failure.get("type")
 
@@ -442,7 +458,12 @@ class SolverModelMixin:
             elif failure_type == "CHARGER_DOWN":
                 self._add_charger_down(failure)
 
-    def _add_station_capacity_reduction(self, failure):
+    def _add_station_capacity_reduction(self, failure) -> None:
+        """Build or validate station-level scheduling data.
+        
+        Args:
+            failure (dict): Operational failure configuration dictionary.
+        """
         station_id = failure["station_id"]
 
         if station_id not in self.stations:
@@ -462,7 +483,12 @@ class SolverModelMixin:
             name=f"capacity_reduction_{failure['operational_failure_id']}",
         )
 
-    def _add_charger_down(self, failure):
+    def _add_charger_down(self, failure) -> None:
+        """Build or validate charger availability and assignment data.
+        
+        Args:
+            failure (dict): Operational failure configuration dictionary.
+        """
         station_id = failure["station_id"]
 
         if station_id not in self.stations:
@@ -481,7 +507,15 @@ class SolverModelMixin:
         failure,
         demand,
         name,
-    ):
+    ) -> None:
+        """Build or validate station-level scheduling data.
+        
+        Args:
+            station_id (str): Charging station identifier.
+            failure (dict): Operational failure configuration dictionary.
+            demand (_type_): Demand used by this function.
+            name (str): Human-readable name used in output or solver variables.
+        """
         start_minute, end_minute = self._failure_window_minutes(failure)
         duration = end_minute - start_minute
 
@@ -500,7 +534,9 @@ class SolverModelMixin:
 
         self.station_intervals[station_id].append((interval, demand))
 
-    def _add_station_capacity_constraints(self):
+    def _add_station_capacity_constraints(self) -> None:
+        """Build or validate station-level scheduling data.
+        """
         for station_id, interval_demands in self.station_intervals.items():
             intervals = [interval for interval, _ in interval_demands]
             demands = [demand for _, demand in interval_demands]
@@ -511,7 +547,9 @@ class SolverModelMixin:
                 self.stations[station_id]["charger_count"],
             )
 
-    def _add_additional_resource_constraints(self):
+    def _add_additional_resource_constraints(self) -> None:
+        """Add a CP-SAT constraint to the model.
+        """
         for resource in self.additional_resource_intervals.values():
             intervals = [interval for interval, _ in resource["intervals"]]
             demands = [demand for _, demand in resource["intervals"]]
@@ -523,7 +561,9 @@ class SolverModelMixin:
                     resource["capacity"],
                 )
 
-    def _add_objective(self):
+    def _add_objective(self) -> None:
+        """Build the CP-SAT optimization objective.
+        """
         max_bus_wait = self.model.NewIntVar(0, self.horizon, "max_bus_wait")
 
         self.model.AddMaxEquality(
@@ -546,7 +586,9 @@ class SolverModelMixin:
             + total_final_arrival_time
         )
 
-    def _operator_fairness_penalty(self):
+    def _operator_fairness_penalty(self) -> object:
+        """Handle operator fairness penalty logic.
+        """
         operator_wait_vars = []
 
         for operator_id in self.operators:
@@ -566,7 +608,10 @@ class SolverModelMixin:
             )
 
             self.model.Add(
-                operator_wait == sum(self.bus_wait_vars[bus_id] for bus_id in bus_ids)
+                operator_wait == sum(
+                    self.bus_wait_vars[bus_id]
+                    for bus_id in bus_ids
+                )
             )
 
             operator_wait_vars.append(operator_wait)
@@ -598,9 +643,16 @@ class SolverModelMixin:
 
         return penalty
 
-    def _generate_valid_plans(self, route):
+    def _generate_valid_plans(self, route) -> object:
+        """Build or evaluate valid charging plans.
+        
+        Args:
+            route (_type_): Route used by this function.
+        """
         charging_stations = [
-            station for station in route["station_sequence"] if station in self.stations
+            station
+            for station in route["station_sequence"]
+            if station in self.stations
         ]
 
         valid_plans = []
@@ -608,7 +660,9 @@ class SolverModelMixin:
         for size in range(1, len(charging_stations) + 1):
             for plan in combinations(charging_stations, size):
                 ordered_plan = [
-                    station for station in route["station_sequence"] if station in plan
+                    station
+                    for station in route["station_sequence"]
+                    if station in plan
                 ]
 
                 if self._is_range_valid(route, ordered_plan):
@@ -616,9 +670,16 @@ class SolverModelMixin:
 
         return valid_plans
 
-    def _is_range_valid(self, route, plan):
+    def _is_range_valid(self, route, plan) -> bool:
+        """Handle is range valid logic.
+        
+        Args:
+            route (_type_): Route used by this function.
+            plan (list[str]): Candidate charging plan for a bus.
+        """
         allowed_range = (
-            BUS_CONFIG["maximum_range_km"] - BUS_CONFIG["minimum_required_range_km"]
+            BUS_CONFIG["maximum_range_km"]
+            - BUS_CONFIG["minimum_required_range_km"]
         )
 
         checkpoints = (
@@ -632,7 +693,6 @@ class SolverModelMixin:
                 route,
                 checkpoints[index],
                 checkpoints[index + 1],
-            )
-            <= allowed_range
+            ) <= allowed_range
             for index in range(len(checkpoints) - 1)
         )

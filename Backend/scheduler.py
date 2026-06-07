@@ -1,37 +1,36 @@
-"""Scheduler coordinator for loading scenarios, building CP-SAT models, and returning optimized results."""
-
 import json
 from collections import defaultdict
 
+from ortools.sat.python import cp_model
+
+from Backend.summary_metrics import build_summary
+
 from Backend.configurations import (
+    SOLVER_CONFIG,
+    ROUTES_CONFIG,
+    STATIONS_CONFIG,
     OPERATORS_CONFIG,
     REOPTIMIZATION_CONFIG,
-    ROUTES_CONFIG,
-    SOLVER_CONFIG,
-    STATIONS_CONFIG,
 )
-from Backend.failure_handler import FailureHandlerMixin
-from Backend.output_builder import OutputBuilderMixin
-from Backend.reoptimization_runner import ReoptimizationRunnerMixin
-from Backend.route_utils import RouteUtilsMixin
-from Backend.solver_model import SolverModelMixin
-from Backend.summary_metrics import build_summary
-from Backend.time_utils import TimeUtilsMixin
-from Backend.weight_utils import WeightUtilsMixin
-from ortools.sat.python import cp_model
+
+from Backend.time_utils import TimeUtilities
+from Backend.route_utils import RouteUtilities
+from Backend.weight_utils import WeightUtilities
+from Backend.failure_handler import FailureHandler
+from Backend.solver_model import SolverModelBuilder
+from Backend.output_builder import ScheduleOutputBuilder
+from Backend.reoptimization_runner import ReoptimizationRunner
 
 
 class BusChargingScheduler(
-    TimeUtilsMixin,
-    RouteUtilsMixin,
-    WeightUtilsMixin,
-    FailureHandlerMixin,
-    SolverModelMixin,
-    OutputBuilderMixin,
-    ReoptimizationRunnerMixin,
+    TimeUtilities,
+    RouteUtilities,
+    WeightUtilities,
+    FailureHandler,
+    SolverModelBuilder,
+    ScheduleOutputBuilder,
+    ReoptimizationRunner,
 ):
-    """Coordinate scenario loading, CP-SAT solving, re-optimization, and output creation."""
-
     def __init__(
         self,
         scenario_path,
@@ -40,7 +39,17 @@ class BusChargingScheduler(
         fixed_schedule=None,
         reoptimization_enabled=True,
         reoptimization_phase=None,
-    ):
+    ) -> None:
+        """Initialize runtime state for this scheduler component.
+        
+        Args:
+            scenario_path (str): Path to the selected scenario JSON file.
+            ui_weights (dict | None, optional): Optimization weights selected from the Streamlit UI. Defaults to None.
+            failure_filter (list[str] | None, optional): Failure types that should be active in this solve. Defaults to None.
+            fixed_schedule (dict | None, optional): Previously committed schedule decisions that must remain unchanged. Defaults to None.
+            reoptimization_enabled (bool, optional): Whether event-driven re-optimization is enabled. Defaults to True.
+            reoptimization_phase (str | None, optional): Name of the current optimization or re-optimization phase. Defaults to None.
+        """
         self.scenario_path = scenario_path
         self.scenario = self._load_json(scenario_path)
         self.ui_weights = ui_weights or {}
@@ -53,12 +62,19 @@ class BusChargingScheduler(
         )
         self.reoptimization_phase = reoptimization_phase or {}
 
-        self.routes = {route["route_id"]: route for route in ROUTES_CONFIG}
+        self.routes = {
+            route["route_id"]: route
+            for route in ROUTES_CONFIG
+        }
 
-        self.stations = {station["station_id"]: station for station in STATIONS_CONFIG}
+        self.stations = {
+            station["station_id"]: station
+            for station in STATIONS_CONFIG
+        }
 
         self.operators = {
-            operator["operator_id"]: operator for operator in OPERATORS_CONFIG
+            operator["operator_id"]: operator
+            for operator in OPERATORS_CONFIG
         }
 
         self.weights = self._get_weights()
@@ -75,15 +91,17 @@ class BusChargingScheduler(
         self.bus_plan_meta = defaultdict(list)
 
         self.station_intervals = defaultdict(list)
-        self.additional_resource_intervals = defaultdict(
-            lambda: {
-                "capacity": 0,
-                "intervals": [],
-            }
-        )
+        self.additional_resource_intervals = defaultdict(lambda: {
+            "capacity": 0,
+            "intervals": [],
+        })
 
-    def solve(self, include_timeline=False):
-        """Run static scheduling or event-driven re-optimization and return the result."""
+    def solve(self, include_timeline=False) -> dict:
+        """Run the scheduler and return the optimized result.
+        
+        Args:
+            include_timeline (bool, optional): Whether compact timeline data should be included in the result. Defaults to False.
+        """
         if self._should_use_event_driven_reoptimization():
             return self._solve_with_event_driven_reoptimization(
                 include_timeline=include_timeline,
@@ -93,8 +111,13 @@ class BusChargingScheduler(
             include_timeline=include_timeline,
         )
 
-    def _solve_static(self, include_timeline=False, phase_name=None):
-        """Build and solve a single CP-SAT scheduling model."""
+    def _solve_static(self, include_timeline=False, phase_name=None) -> object:
+        """Run a CP-SAT solve step.
+        
+        Args:
+            include_timeline (bool, optional): Whether compact timeline data should be included in the result. Defaults to False.
+            phase_name (_type_, optional): Phase name used by this function. Defaults to None.
+        """
         self._build_model()
         self._apply_solver_config()
 
@@ -144,21 +167,32 @@ class BusChargingScheduler(
 
         return result
 
-    def _validate_bus(self, bus):
-        """Validate route and operator references for one bus."""
+    def _validate_bus(self, bus) -> None:
+        """Validate input data before optimization.
+        
+        Args:
+            bus (dict): Bus input or output dictionary.
+        """
         if bus["route_id"] not in self.routes:
-            raise ValueError(f"Invalid route_id: {bus['route_id']}")
+            raise ValueError(
+                f"Invalid route_id: {bus['route_id']}"
+            )
 
         if bus["operator_id"] not in self.operators:
-            raise ValueError(f"Invalid operator_id: {bus['operator_id']}")
+            raise ValueError(
+                f"Invalid operator_id: {bus['operator_id']}"
+            )
 
-    def _apply_solver_config(self):
-        """Apply configured CP-SAT solver limits and runtime settings."""
+    def _apply_solver_config(self) -> None:
+        """Run a CP-SAT solve step.
+        """
         self.solver.parameters.max_time_in_seconds = SOLVER_CONFIG[
             "max_solve_time_seconds"
         ]
 
-        self.solver.parameters.num_search_workers = SOLVER_CONFIG["num_search_workers"]
+        self.solver.parameters.num_search_workers = SOLVER_CONFIG[
+            "num_search_workers"
+        ]
 
         self.solver.parameters.log_search_progress = SOLVER_CONFIG[
             "log_search_progress"
@@ -170,8 +204,12 @@ class BusChargingScheduler(
         )
 
     @staticmethod
-    def _load_json(file_path):
-        """Load a JSON file from disk."""
+    def _load_json(file_path) -> object:
+        """Load required data for the scheduler.
+        
+        Args:
+            file_path (str): Path of the file being loaded or written.
+        """
         with open(file_path, "r") as file:
             return json.load(file)
 

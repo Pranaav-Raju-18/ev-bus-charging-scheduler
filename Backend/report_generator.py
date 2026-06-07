@@ -1,12 +1,16 @@
-"""Excel report generation for validating bus and charger timelines."""
-
 import io
 from collections import defaultdict
 
 import pandas as pd
-from Backend.configurations import BUS_CONFIG, ROUTES_CONFIG, STATIONS_CONFIG
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+
+from Backend.configurations import (
+    BUS_CONFIG,
+    ROUTES_CONFIG,
+    STATIONS_CONFIG,
+)
+
 
 TIME_SLOT_MINUTES = 5
 
@@ -29,8 +33,12 @@ THIN_BORDER = Border(
 )
 
 
-def build_excel_report(result):
-    """Create the downloadable Excel report from a scheduler result."""
+def build_excel_report(result) -> bytes:
+    """Create the downloadable Excel workbook.
+    
+    Args:
+        result (dict): Final scheduler result dictionary.
+    """
     output = io.BytesIO()
 
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -88,7 +96,12 @@ def build_excel_report(result):
     return output
 
 
-def _summary_rows(result):
+def _summary_rows(result) -> object:
+    """Build summary metrics from the schedule.
+    
+    Args:
+        result (dict): Final scheduler result dictionary.
+    """
     rows = [
         {"Metric": "Scenario ID", "Value": result.get("scenario_id")},
         {"Metric": "Scenario Name", "Value": result.get("scenario_name")},
@@ -106,7 +119,12 @@ def _summary_rows(result):
     return rows
 
 
-def _operator_metric_rows(result):
+def _operator_metric_rows(result) -> object:
+    """Handle operator metric rows logic.
+    
+    Args:
+        result (dict): Final scheduler result dictionary.
+    """
     summary = result.get("summary", {})
 
     operator_ids = sorted(
@@ -119,21 +137,20 @@ def _operator_metric_rows(result):
         {
             "Operator": operator_id,
             "Bus Count": summary.get("operator_bus_count", {}).get(operator_id, 0),
-            "Total Wait Minutes": summary.get("operator_total_wait_minutes", {}).get(
-                operator_id, 0
-            ),
-            "Average Wait Minutes": summary.get(
-                "operator_average_wait_minutes", {}
-            ).get(operator_id, 0),
-            "Max Wait Minutes": summary.get("operator_max_wait_minutes", {}).get(
-                operator_id, 0
-            ),
+            "Total Wait Minutes": summary.get("operator_total_wait_minutes", {}).get(operator_id, 0),
+            "Average Wait Minutes": summary.get("operator_average_wait_minutes", {}).get(operator_id, 0),
+            "Max Wait Minutes": summary.get("operator_max_wait_minutes", {}).get(operator_id, 0),
         }
         for operator_id in operator_ids
     ]
 
 
-def _bus_timetable_rows(result):
+def _bus_timetable_rows(result) -> object:
+    """Convert or compare schedule time values.
+    
+    Args:
+        result (dict): Final scheduler result dictionary.
+    """
     return [
         {
             "Bus ID": bus["bus_id"],
@@ -151,71 +168,84 @@ def _bus_timetable_rows(result):
     ]
 
 
-def _bus_charging_event_rows(result):
+def _bus_charging_event_rows(result) -> object:
+    """Handle timeline event queue processing.
+    
+    Args:
+        result (dict): Final scheduler result dictionary.
+    """
     rows = []
 
     for bus in result.get("bus_timetables", []):
         for event_number, event in enumerate(bus.get("charging_events", []), start=1):
-            rows.append(
-                {
-                    "Bus ID": bus["bus_id"],
-                    "Operator": bus["operator_id"],
-                    "Route": bus["route_id"],
-                    "Event Number": event_number,
-                    "Station ID": event["station_id"],
-                    "Charger ID": event["charger_id"],
-                    "Reached At": event["reached_at"],
-                    "Charging Started At": event["started_at"],
-                    "Charging Ended At": event["ended_at"],
-                    "Wait Minutes": event["wait_minutes"],
-                    "Charging Mode": event.get("charging_mode"),
-                    "Charger Blocked Minutes": event.get("charger_blocked_minutes"),
-                    "Operational Failure ID": event.get("operational_failure_id"),
-                    "Operational Failure Reason": event.get(
-                        "operational_failure_reason"
-                    ),
-                }
-            )
+            rows.append({
+                "Bus ID": bus["bus_id"],
+                "Operator": bus["operator_id"],
+                "Route": bus["route_id"],
+                "Event Number": event_number,
+                "Station ID": event["station_id"],
+                "Charger ID": event["charger_id"],
+                "Reached At": event["reached_at"],
+                "Charging Started At": event["started_at"],
+                "Charging Ended At": event["ended_at"],
+                "Wait Minutes": event["wait_minutes"],
+                "Charging Mode": event.get("charging_mode"),
+                "Charger Blocked Minutes": event.get("charger_blocked_minutes"),
+                "Operational Failure ID": event.get("operational_failure_id"),
+                "Operational Failure Reason": event.get("operational_failure_reason"),
+            })
 
     return rows
 
 
-def _station_order_rows(result):
+def _station_order_rows(result) -> object:
+    """Build or validate station-level scheduling data.
+    
+    Args:
+        result (dict): Final scheduler result dictionary.
+    """
     rows = []
 
     for station_id, events in result.get("station_charging_orders", {}).items():
         for order_number, event in enumerate(events, start=1):
-            rows.append(
-                {
-                    "Station ID": station_id,
-                    "Order": order_number,
-                    "Bus ID": event["bus_id"],
-                    "Operator": event["operator_id"],
-                    "Charger ID": event["charger_id"],
-                    "Charging Started At": event["charging_started_at"],
-                    "Charging Ended At": event["charging_ended_at"],
-                    "Wait Minutes": event["wait_minutes"],
-                    "Charging Mode": event.get("charging_mode"),
-                    "Charger Blocked Minutes": event.get("charger_blocked_minutes"),
-                    "Operational Failure ID": event.get("operational_failure_id"),
-                    "Operational Failure Reason": event.get(
-                        "operational_failure_reason"
-                    ),
-                }
-            )
+            rows.append({
+                "Station ID": station_id,
+                "Order": order_number,
+                "Bus ID": event["bus_id"],
+                "Operator": event["operator_id"],
+                "Charger ID": event["charger_id"],
+                "Charging Started At": event["charging_started_at"],
+                "Charging Ended At": event["charging_ended_at"],
+                "Wait Minutes": event["wait_minutes"],
+                "Charging Mode": event.get("charging_mode"),
+                "Charger Blocked Minutes": event.get("charger_blocked_minutes"),
+                "Operational Failure ID": event.get("operational_failure_id"),
+                "Operational Failure Reason": event.get("operational_failure_reason"),
+            })
 
     return rows
 
 
-def _timeline_summary_rows(result):
+def _timeline_summary_rows(result) -> list:
+    """Convert or compare schedule time values.
+    
+    Args:
+        result (dict): Final scheduler result dictionary.
+    """
     bus_timeline_data = _bus_timeline_data(result)
     charger_events = _charger_events(result)
 
     completed_buses = sum(
-        1 for bus_data in bus_timeline_data if bus_data["completed"] == "YES"
+        1
+        for bus_data in bus_timeline_data
+        if bus_data["completed"] == "YES"
     )
 
-    overlap_count = sum(1 for event in charger_events if event["overlap"] == "YES")
+    overlap_count = sum(
+        1
+        for event in charger_events
+        if event["overlap"] == "YES"
+    )
 
     return [
         {
@@ -271,7 +301,12 @@ def _timeline_summary_rows(result):
     ]
 
 
-def _bus_timeline_km_dataframe(result):
+def _bus_timeline_km_dataframe(result) -> object:
+    """Convert or compare schedule time values.
+    
+    Args:
+        result (dict): Final scheduler result dictionary.
+    """
     bus_timeline_data = _bus_timeline_data(result)
     start_minute, end_minute = _timeline_bounds_from_bus_data(bus_timeline_data)
     time_slots = list(range(start_minute, end_minute + 1, TIME_SLOT_MINUTES))
@@ -305,7 +340,12 @@ def _bus_timeline_km_dataframe(result):
     return pd.DataFrame(rows)
 
 
-def _charger_timeline_dataframe(result):
+def _charger_timeline_dataframe(result) -> object:
+    """Convert or compare schedule time values.
+    
+    Args:
+        result (dict): Final scheduler result dictionary.
+    """
     charger_events = _charger_events(result)
 
     if not charger_events:
@@ -337,14 +377,9 @@ def _charger_timeline_dataframe(result):
         row = {
             "Station": station_id,
             "Charger": charger_id,
-            "Overlap Check": (
-                "YES"
-                if any(
-                    event["overlap"] == "YES"
-                    for event in events_by_charger.get(charger_id, [])
-                )
-                else "NO"
-            ),
+            "Overlap Check": "YES"
+            if any(event["overlap"] == "YES" for event in events_by_charger.get(charger_id, []))
+            else "NO",
         }
 
         for slot_start in time_slots:
@@ -359,8 +394,16 @@ def _charger_timeline_dataframe(result):
     return pd.DataFrame(rows)
 
 
-def _bus_timeline_data(result):
-    routes = {route["route_id"]: route for route in ROUTES_CONFIG}
+def _bus_timeline_data(result) -> object:
+    """Convert or compare schedule time values.
+    
+    Args:
+        result (dict): Final scheduler result dictionary.
+    """
+    routes = {
+        route["route_id"]: route
+        for route in ROUTES_CONFIG
+    }
 
     bus_data_rows = []
 
@@ -407,55 +450,49 @@ def _bus_timeline_data(result):
             travel_start_km = distance_since_charge
             travel_end_km = distance_since_charge + travel_distance
 
-            activities.append(
-                {
-                    "activity": "TRAVEL",
-                    "from": current_station,
-                    "to": station_id,
-                    "station": station_id,
-                    "charger": "",
-                    "start_minute": current_minute,
-                    "end_minute": reached_minute,
-                    "start_km_since_charge": travel_start_km,
-                    "end_km_since_charge": travel_end_km,
-                    "distance_km": travel_distance,
-                }
-            )
+            activities.append({
+                "activity": "TRAVEL",
+                "from": current_station,
+                "to": station_id,
+                "station": station_id,
+                "charger": "",
+                "start_minute": current_minute,
+                "end_minute": reached_minute,
+                "start_km_since_charge": travel_start_km,
+                "end_km_since_charge": travel_end_km,
+                "distance_km": travel_distance,
+            })
 
             distance_since_charge = travel_end_km
             distance_covered += travel_distance
             max_km_between_charges = max(max_km_between_charges, distance_since_charge)
 
             if charging_started_minute > reached_minute:
-                activities.append(
-                    {
-                        "activity": "WAIT",
-                        "from": "",
-                        "to": station_id,
-                        "station": station_id,
-                        "charger": "",
-                        "start_minute": reached_minute,
-                        "end_minute": charging_started_minute,
-                        "start_km_since_charge": distance_since_charge,
-                        "end_km_since_charge": distance_since_charge,
-                        "distance_km": 0,
-                    }
-                )
-
-            activities.append(
-                {
-                    "activity": "CHARGING",
+                activities.append({
+                    "activity": "WAIT",
                     "from": "",
                     "to": station_id,
                     "station": station_id,
-                    "charger": event["charger_id"],
-                    "start_minute": charging_started_minute,
-                    "end_minute": charging_ended_minute,
+                    "charger": "",
+                    "start_minute": reached_minute,
+                    "end_minute": charging_started_minute,
                     "start_km_since_charge": distance_since_charge,
-                    "end_km_since_charge": 0,
+                    "end_km_since_charge": distance_since_charge,
                     "distance_km": 0,
-                }
-            )
+                })
+
+            activities.append({
+                "activity": "CHARGING",
+                "from": "",
+                "to": station_id,
+                "station": station_id,
+                "charger": event["charger_id"],
+                "start_minute": charging_started_minute,
+                "end_minute": charging_ended_minute,
+                "start_km_since_charge": distance_since_charge,
+                "end_km_since_charge": 0,
+                "distance_km": 0,
+            })
 
             current_station = station_id
             current_minute = charging_ended_minute
@@ -467,58 +504,55 @@ def _bus_timeline_data(result):
             bus["destination"],
         )
 
-        activities.append(
-            {
-                "activity": "TRAVEL",
-                "from": current_station,
-                "to": bus["destination"],
-                "station": bus["destination"],
-                "charger": "",
-                "start_minute": current_minute,
-                "end_minute": final_arrival_minute,
-                "start_km_since_charge": distance_since_charge,
-                "end_km_since_charge": distance_since_charge + final_travel_distance,
-                "distance_km": final_travel_distance,
-            }
-        )
+        activities.append({
+            "activity": "TRAVEL",
+            "from": current_station,
+            "to": bus["destination"],
+            "station": bus["destination"],
+            "charger": "",
+            "start_minute": current_minute,
+            "end_minute": final_arrival_minute,
+            "start_km_since_charge": distance_since_charge,
+            "end_km_since_charge": distance_since_charge + final_travel_distance,
+            "distance_km": final_travel_distance,
+        })
 
         distance_since_charge += final_travel_distance
         distance_covered += final_travel_distance
         max_km_between_charges = max(max_km_between_charges, distance_since_charge)
 
-        completed = (
-            "YES" if round(distance_covered, 2) == round(route_distance, 2) else "NO"
-        )
+        completed = "YES" if round(distance_covered, 2) == round(route_distance, 2) else "NO"
 
-        bus_data_rows.append(
-            {
-                "bus_id": bus["bus_id"],
-                "operator_id": bus["operator_id"],
-                "route_id": bus["route_id"],
-                "origin": bus["origin"],
-                "destination": bus["destination"],
-                "departure_time": bus["departure_time"],
-                "final_arrival_time": bus["final_arrival_time"],
-                "charging_plan": bus["charging_plan"],
-                "route_distance_km": route_distance,
-                "distance_covered_km": round(distance_covered, 2),
-                "completed": completed,
-                "max_km_between_charges": round(max_km_between_charges, 2),
-                "range_valid": (
-                    "YES"
-                    if max_km_between_charges <= BUS_CONFIG["maximum_range_km"]
-                    else "NO"
-                ),
-                "activities": activities,
-                "departure_minute": departure_minute,
-                "final_arrival_minute": final_arrival_minute,
-            }
-        )
+        bus_data_rows.append({
+            "bus_id": bus["bus_id"],
+            "operator_id": bus["operator_id"],
+            "route_id": bus["route_id"],
+            "origin": bus["origin"],
+            "destination": bus["destination"],
+            "departure_time": bus["departure_time"],
+            "final_arrival_time": bus["final_arrival_time"],
+            "charging_plan": bus["charging_plan"],
+            "route_distance_km": route_distance,
+            "distance_covered_km": round(distance_covered, 2),
+            "completed": completed,
+            "max_km_between_charges": round(max_km_between_charges, 2),
+            "range_valid": "YES"
+            if max_km_between_charges <= BUS_CONFIG["maximum_range_km"]
+            else "NO",
+            "activities": activities,
+            "departure_minute": departure_minute,
+            "final_arrival_minute": final_arrival_minute,
+        })
 
     return bus_data_rows
 
 
-def _charger_events(result):
+def _charger_events(result) -> object:
+    """Build or validate charger availability and assignment data.
+    
+    Args:
+        result (dict): Final scheduler result dictionary.
+    """
     events = []
 
     for station_id, station_events in result.get("station_charging_orders", {}).items():
@@ -529,18 +563,16 @@ def _charger_events(result):
                 start_minute,
             )
 
-            events.append(
-                {
-                    "station_id": station_id,
-                    "charger_id": event["charger_id"],
-                    "bus_id": event["bus_id"],
-                    "operator_id": event["operator_id"],
-                    "start_minute": start_minute,
-                    "end_minute": end_minute,
-                    "charging_mode": event.get("charging_mode", "NORMAL"),
-                    "overlap": "NO",
-                }
-            )
+            events.append({
+                "station_id": station_id,
+                "charger_id": event["charger_id"],
+                "bus_id": event["bus_id"],
+                "operator_id": event["operator_id"],
+                "start_minute": start_minute,
+                "end_minute": end_minute,
+                "charging_mode": event.get("charging_mode", "NORMAL"),
+                "overlap": "NO",
+            })
 
     events_by_charger = defaultdict(list)
 
@@ -564,7 +596,14 @@ def _charger_events(result):
     return events
 
 
-def _bus_timeline_cell(bus_data, slot_start, slot_end):
+def _bus_timeline_cell(bus_data, slot_start, slot_end) -> str:
+    """Convert or compare schedule time values.
+    
+    Args:
+        bus_data (_type_): Bus data used by this function.
+        slot_start (_type_): Slot start used by this function.
+        slot_end (_type_): Slot end used by this function.
+    """
     if slot_start >= bus_data["final_arrival_minute"]:
         return f"ARR\n{bus_data['route_distance_km']}km total"
 
@@ -578,7 +617,8 @@ def _bus_timeline_cell(bus_data, slot_start, slot_end):
                 )
 
                 return (
-                    f"T:{activity['from']}->{activity['to']}\n" f"{start_km}-{end_km}km"
+                    f"T:{activity['from']}->{activity['to']}\n"
+                    f"{start_km}-{end_km}km"
                 )
 
             if activity["activity"] == "WAIT":
@@ -588,12 +628,22 @@ def _bus_timeline_cell(bus_data, slot_start, slot_end):
                 )
 
             if activity["activity"] == "CHARGING":
-                return f"C:{activity['station']}/{activity['charger']}\n" f"RESET→0km"
+                return (
+                    f"C:{activity['station']}/{activity['charger']}\n"
+                    f"RESET→0km"
+                )
 
     return ""
 
 
-def _charger_timeline_cell(events, slot_start, slot_end):
+def _charger_timeline_cell(events, slot_start, slot_end) -> object:
+    """Convert or compare schedule time values.
+    
+    Args:
+        events (_type_): Events used by this function.
+        slot_start (_type_): Slot start used by this function.
+        slot_end (_type_): Slot end used by this function.
+    """
     overlapping_events = [
         event
         for event in events
@@ -609,7 +659,14 @@ def _charger_timeline_cell(events, slot_start, slot_end):
     return overlapping_events[0]["bus_id"]
 
 
-def _km_range_for_slot(activity, slot_start, slot_end):
+def _km_range_for_slot(activity, slot_start, slot_end) -> tuple:
+    """Handle km range for slot logic.
+    
+    Args:
+        activity (_type_): Activity used by this function.
+        slot_start (_type_): Slot start used by this function.
+        slot_end (_type_): Slot end used by this function.
+    """
     activity_start = activity["start_minute"]
     activity_end = activity["end_minute"]
     duration = max(activity_end - activity_start, 1)
@@ -626,18 +683,34 @@ def _km_range_for_slot(activity, slot_start, slot_end):
     return round(start_km, 1), round(end_km, 1)
 
 
-def _timeline_bounds_from_bus_data(bus_timeline_data):
+def _timeline_bounds_from_bus_data(bus_timeline_data) -> tuple:
+    """Convert or compare schedule time values.
+    
+    Args:
+        bus_timeline_data (_type_): Bus timeline data used by this function.
+    """
     if not bus_timeline_data:
         return 0, 0
 
-    start_minute = min(bus_data["departure_minute"] for bus_data in bus_timeline_data)
+    start_minute = min(
+        bus_data["departure_minute"]
+        for bus_data in bus_timeline_data
+    )
 
-    end_minute = max(bus_data["final_arrival_minute"] for bus_data in bus_timeline_data)
+    end_minute = max(
+        bus_data["final_arrival_minute"]
+        for bus_data in bus_timeline_data
+    )
 
     return _floor_to_slot(start_minute), _ceil_to_slot(end_minute)
 
 
-def _style_workbook(writer):
+def _style_workbook(writer) -> None:
+    """Handle style workbook logic.
+    
+    Args:
+        writer (_type_): Writer used by this function.
+    """
     for worksheet in writer.book.worksheets:
         _style_header_row(worksheet)
         _autosize_columns(worksheet)
@@ -653,17 +726,25 @@ def _style_workbook(writer):
         _style_charger_timeline_sheet(writer.sheets["Charger Timeline View"])
 
 
-def _style_header_row(worksheet):
+def _style_header_row(worksheet) -> None:
+    """Handle style header row logic.
+    
+    Args:
+        worksheet (_type_): OpenPyXL worksheet being written.
+    """
     for cell in worksheet[1]:
         cell.fill = PatternFill("solid", fgColor=HEADER_FILL)
         cell.font = Font(color=HEADER_FONT, bold=True)
-        cell.alignment = Alignment(
-            horizontal="center", vertical="center", wrap_text=True
-        )
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         cell.border = THIN_BORDER
 
 
-def _style_timeline_summary(worksheet):
+def _style_timeline_summary(worksheet) -> None:
+    """Convert or compare schedule time values.
+    
+    Args:
+        worksheet (_type_): OpenPyXL worksheet being written.
+    """
     for row in worksheet.iter_rows(min_row=2):
         for cell in row:
             cell.fill = PatternFill("solid", fgColor=SUMMARY_FILL)
@@ -671,7 +752,12 @@ def _style_timeline_summary(worksheet):
             cell.border = THIN_BORDER
 
 
-def _style_bus_timeline_sheet(worksheet):
+def _style_bus_timeline_sheet(worksheet) -> None:
+    """Convert or compare schedule time values.
+    
+    Args:
+        worksheet (_type_): OpenPyXL worksheet being written.
+    """
     fixed_columns = 11
 
     worksheet.freeze_panes = "A2"
@@ -701,9 +787,7 @@ def _style_bus_timeline_sheet(worksheet):
                 fill = IDLE_FILL
 
             cell.fill = PatternFill("solid", fgColor=fill)
-            cell.alignment = Alignment(
-                horizontal="center", vertical="center", wrap_text=True
-            )
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             cell.border = THIN_BORDER
 
     for row_number in range(2, worksheet.max_row + 1):
@@ -715,7 +799,12 @@ def _style_bus_timeline_sheet(worksheet):
         )
 
 
-def _style_charger_timeline_sheet(worksheet):
+def _style_charger_timeline_sheet(worksheet) -> None:
+    """Convert or compare schedule time values.
+    
+    Args:
+        worksheet (_type_): OpenPyXL worksheet being written.
+    """
     fixed_columns = 3
 
     worksheet.freeze_panes = "A2"
@@ -738,9 +827,7 @@ def _style_charger_timeline_sheet(worksheet):
                 fill = IDLE_FILL
 
             cell.fill = PatternFill("solid", fgColor=fill)
-            cell.alignment = Alignment(
-                horizontal="center", vertical="center", wrap_text=True
-            )
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             cell.border = THIN_BORDER
 
     for row_number in range(2, worksheet.max_row + 1):
@@ -752,7 +839,12 @@ def _style_charger_timeline_sheet(worksheet):
         )
 
 
-def _autosize_columns(worksheet):
+def _autosize_columns(worksheet) -> None:
+    """Handle autosize columns logic.
+    
+    Args:
+        worksheet (_type_): OpenPyXL worksheet being written.
+    """
     for column_cells in worksheet.columns:
         max_length = 0
         column_letter = column_cells[0].column_letter
@@ -770,20 +862,45 @@ def _autosize_columns(worksheet):
         )
 
 
-def _freeze_header_only(worksheet):
+def _freeze_header_only(worksheet) -> None:
+    """Handle freeze header only logic.
+    
+    Args:
+        worksheet (_type_): OpenPyXL worksheet being written.
+    """
     worksheet.freeze_panes = "A2"
 
 
-def _route_distance(route):
-    return sum(segment["distance_km"] for segment in route["station_distances_in_km"])
+def _route_distance(route) -> object:
+    """Calculate route, station, or distance information.
+    
+    Args:
+        route (_type_): Route used by this function.
+    """
+    return sum(
+        segment["distance_km"]
+        for segment in route["station_distances_in_km"]
+    )
 
 
-def _distance_between(route, from_station, to_station):
+def _distance_between(route, from_station, to_station) -> object:
+    """Calculate distance-related values.
+    
+    Args:
+        route (_type_): Route used by this function.
+        from_station (_type_): From station used by this function.
+        to_station (_type_): To station used by this function.
+    """
     cumulative = _cumulative_distance(route)
     return abs(cumulative[to_station] - cumulative[from_station])
 
 
-def _cumulative_distance(route):
+def _cumulative_distance(route) -> object:
+    """Calculate distance-related values.
+    
+    Args:
+        route (_type_): Route used by this function.
+    """
     total_distance = 0
     cumulative = {route["station_sequence"][0]: 0}
 
@@ -794,12 +911,23 @@ def _cumulative_distance(route):
     return cumulative
 
 
-def _time_to_minutes(time_text):
+def _time_to_minutes(time_text) -> object:
+    """Convert or compare schedule time values.
+    
+    Args:
+        time_text (str): Time value in HH:MM format.
+    """
     hour, minute = map(int, time_text.split(":"))
     return hour * 60 + minute
 
 
-def _time_to_minutes_after(time_text, minimum_minute):
+def _time_to_minutes_after(time_text, minimum_minute) -> object:
+    """Convert or compare schedule time values.
+    
+    Args:
+        time_text (str): Time value in HH:MM format.
+        minimum_minute (_type_): Minimum minute represented in minutes.
+    """
     candidate_minute = _time_to_minutes(time_text)
 
     while candidate_minute < minimum_minute:
@@ -808,16 +936,31 @@ def _time_to_minutes_after(time_text, minimum_minute):
     return candidate_minute
 
 
-def _minutes_to_time(minutes):
+def _minutes_to_time(minutes) -> str:
+    """Convert or compare schedule time values.
+    
+    Args:
+        minutes (_type_): Minutes used by this function.
+    """
     hour = (minutes // 60) % 24
     minute = minutes % 60
 
     return f"{hour:02d}:{minute:02d}"
 
 
-def _floor_to_slot(minute):
+def _floor_to_slot(minute) -> object:
+    """Handle floor to slot logic.
+    
+    Args:
+        minute (int): Timeline minute used for ordering events.
+    """
     return (minute // TIME_SLOT_MINUTES) * TIME_SLOT_MINUTES
 
 
-def _ceil_to_slot(minute):
+def _ceil_to_slot(minute) -> object:
+    """Handle ceil to slot logic.
+    
+    Args:
+        minute (int): Timeline minute used for ordering events.
+    """
     return ((minute + TIME_SLOT_MINUTES - 1) // TIME_SLOT_MINUTES) * TIME_SLOT_MINUTES

@@ -1,5 +1,3 @@
-"""Summary metric builders for buses, operators, stations, and simulation windows."""
-
 from collections import defaultdict
 
 
@@ -11,24 +9,53 @@ def build_summary(
     final_arrival_vars,
     time_to_minutes,
     minutes_to_time,
-):
-    """Build high-level, station-level, and operator-level metrics."""
+) -> dict:
+    """Build scenario, station, and operator summary metrics.
+    
+    Args:
+        bus_timetables (_type_): Bus timetables used by this function.
+        station_orders (dict): Station-wise charging order output.
+        stations (_type_): Stations used by this function.
+        solver (_type_): OR-Tools CP-SAT solver instance.
+        final_arrival_vars (_type_): Final arrival vars used by this function.
+        time_to_minutes (_type_): Time to minutes represented in minutes.
+        minutes_to_time (_type_): Minutes to time used by this function.
+    """
     total_buses = len(bus_timetables)
 
     if total_buses == 0:
         return _empty_summary()
 
-    total_wait = sum(bus["total_wait_minutes"] for bus in bus_timetables)
+    total_wait = sum(
+        bus["total_wait_minutes"]
+        for bus in bus_timetables
+    )
 
-    max_wait = max(bus["total_wait_minutes"] for bus in bus_timetables)
+    max_wait = max(
+        bus["total_wait_minutes"]
+        for bus in bus_timetables
+    )
 
-    buses_with_wait = sum(1 for bus in bus_timetables if bus["total_wait_minutes"] > 0)
+    buses_with_wait = sum(
+        1
+        for bus in bus_timetables
+        if bus["total_wait_minutes"] > 0
+    )
 
-    total_arrival_delay = sum(bus["arrival_delay_minutes"] for bus in bus_timetables)
+    total_arrival_delay = sum(
+        bus["arrival_delay_minutes"]
+        for bus in bus_timetables
+    )
 
-    max_arrival_delay = max(bus["arrival_delay_minutes"] for bus in bus_timetables)
+    max_arrival_delay = max(
+        bus["arrival_delay_minutes"]
+        for bus in bus_timetables
+    )
 
-    total_charging_stops = sum(bus["total_charging_stops"] for bus in bus_timetables)
+    total_charging_stops = sum(
+        bus["total_charging_stops"]
+        for bus in bus_timetables
+    )
 
     operational_failure_charging_events = sum(
         1
@@ -52,11 +79,13 @@ def build_summary(
         )
 
     operator_bus_count = {
-        operator_id: len(waits) for operator_id, waits in operator_wait.items()
+        operator_id: len(waits)
+        for operator_id, waits in operator_wait.items()
     }
 
     operator_total_wait = {
-        operator_id: sum(waits) for operator_id, waits in operator_wait.items()
+        operator_id: sum(waits)
+        for operator_id, waits in operator_wait.items()
     }
 
     operator_average_wait = {
@@ -65,7 +94,8 @@ def build_summary(
     }
 
     operator_max_wait = {
-        operator_id: max(waits) for operator_id, waits in operator_wait.items()
+        operator_id: max(waits)
+        for operator_id, waits in operator_wait.items()
     }
 
     operator_fairness_gap = (
@@ -75,11 +105,13 @@ def build_summary(
     )
 
     simulation_start_minute = min(
-        time_to_minutes(bus["departure_time"]) for bus in bus_timetables
+        time_to_minutes(bus["departure_time"])
+        for bus in bus_timetables
     )
 
     simulation_end_minute = max(
-        solver.Value(final_arrival_vars[bus["bus_id"]]) for bus in bus_timetables
+        solver.Value(final_arrival_vars[bus["bus_id"]])
+        for bus in bus_timetables
     )
 
     simulation_duration = simulation_end_minute - simulation_start_minute
@@ -134,7 +166,14 @@ def _build_station_metrics(
     station_orders,
     stations,
     simulation_duration,
-):
+) -> object:
+    """Build or validate station-level scheduling data.
+    
+    Args:
+        station_orders (dict): Station-wise charging order output.
+        stations (_type_): Stations used by this function.
+        simulation_duration (_type_): Simulation duration used by this function.
+    """
     station_metrics = {}
 
     for station_id, station in stations.items():
@@ -142,7 +181,10 @@ def _build_station_metrics(
         charger_count = station["charger_count"]
         total_sessions = len(events)
 
-        total_wait = sum(event["wait_minutes"] for event in events)
+        total_wait = sum(
+            event["wait_minutes"]
+            for event in events
+        )
 
         max_wait = max(
             [event["wait_minutes"] for event in events],
@@ -150,20 +192,27 @@ def _build_station_metrics(
         )
 
         total_charging_minutes = sum(
-            event["charging_ended_at_minute"] - event["charging_started_at_minute"]
+            event["charging_ended_at_minute"]
+            - event["charging_started_at_minute"]
             for event in events
         )
 
         slow_charging_sessions = sum(
-            1 for event in events if event["charging_mode"] == "SLOW_CHARGING"
+            1
+            for event in events
+            if event["charging_mode"] == "SLOW_CHARGING"
         )
 
         operational_failure_sessions = sum(
-            1 for event in events if event["operational_failure_id"]
+            1
+            for event in events
+            if event["operational_failure_id"]
         )
 
         available_charger_minutes = (
-            charger_count * simulation_duration if simulation_duration > 0 else 0
+            charger_count * simulation_duration
+            if simulation_duration > 0
+            else 0
         )
 
         utilization_percent = (
@@ -181,14 +230,10 @@ def _build_station_metrics(
             "slow_charging_sessions": slow_charging_sessions,
             "operational_failure_sessions": operational_failure_sessions,
             "total_wait_minutes": total_wait,
-            "average_wait_minutes": (
-                round(
-                    total_wait / total_sessions,
-                    2,
-                )
-                if total_sessions
-                else 0
-            ),
+            "average_wait_minutes": round(
+                total_wait / total_sessions,
+                2,
+            ) if total_sessions else 0,
             "max_wait_minutes": max_wait,
             "total_charging_minutes": total_charging_minutes,
             "charger_utilization_percent": utilization_percent,
@@ -197,7 +242,9 @@ def _build_station_metrics(
     return station_metrics
 
 
-def _empty_summary():
+def _empty_summary() -> dict:
+    """Build summary metrics from the schedule.
+    """
     return {
         "total_buses": 0,
         "total_wait_minutes": 0,
