@@ -1,7 +1,11 @@
+"""Route utilities for travel distance, station order, and horizon calculations."""
+
 from Backend.configurations import BUS_CONFIG
 
 
 class RouteUtilsMixin:
+    """Provide route lookup, travel time, and distance calculations."""
+
     def _distance_between(self, route, from_station, to_station):
         cumulative = self._cumulative_distance(route)
         return cumulative[to_station] - cumulative[from_station]
@@ -22,8 +26,7 @@ class RouteUtilsMixin:
 
     def _route_distance(self, route):
         return sum(
-            segment["distance_km"]
-            for segment in route["station_distances_in_km"]
+            segment["distance_km"] for segment in route["station_distances_in_km"]
         )
 
     def _calculate_horizon(self):
@@ -33,13 +36,10 @@ class RouteUtilsMixin:
         )
 
         max_route_distance = max(
-            self._route_distance(route)
-            for route in self.routes.values()
+            self._route_distance(route) for route in self.routes.values()
         )
 
-        route_time = round(
-            (max_route_distance / BUS_CONFIG["speed_kmph"]) * 60
-        )
+        route_time = round((max_route_distance / BUS_CONFIG["speed_kmph"]) * 60)
 
         max_charging_time = len(self.stations) * self._max_charging_time()
 
@@ -56,5 +56,8 @@ class RouteUtilsMixin:
 
         return max(
             latest_departure + route_time + max_charging_time + waiting_buffer,
-            latest_operational_failure_end + route_time + max_charging_time + waiting_buffer,
+            latest_operational_failure_end
+            + route_time
+            + max_charging_time
+            + waiting_buffer,
         )

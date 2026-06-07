@@ -1,25 +1,24 @@
+"""Streamlit entrypoint for running scenarios, visualizing schedules, and downloading validation reports."""
+
 import json
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
-
-from Backend.scheduler import BusChargingScheduler
-from Backend.report_generator import build_excel_report
-
 from Backend.configurations import (
-    CHARGER_CONFIG,
     BUS_CONFIG,
-    OPTIMIZATION_WEIGHTS,
-    SOLVER_CONFIG,
-    ROUTES_CONFIG,
-    STATIONS_CONFIG,
-    OPERATORS_CONFIG,
+    CHARGER_CONFIG,
     OPERATIONAL_FAILURE_SETTINGS,
     OPERATIONAL_FAILURES,
+    OPERATORS_CONFIG,
+    OPTIMIZATION_WEIGHTS,
     REOPTIMIZATION_CONFIG,
+    ROUTES_CONFIG,
+    SOLVER_CONFIG,
+    STATIONS_CONFIG,
 )
-
+from Backend.report_generator import build_excel_report
+from Backend.scheduler import BusChargingScheduler
 
 SCENARIO_FOLDER = Path("Backend/scenarios")
 
@@ -240,7 +239,7 @@ st.markdown(
             font-weight: 700;
             margin-bottom: 0.2rem;
         }
-    
+
         .reopt-card {
             border-left: 6px solid #F5B400;
             background-color: #F8F8F8;
@@ -278,11 +277,13 @@ st.markdown(
 
 
 def time_to_minutes(time_text):
+    """Convert HH:MM text into minutes from midnight."""
     hour, minute = map(int, time_text.split(":"))
     return hour * 60 + minute
 
 
 def calculate_journey_minutes(departure_time, final_arrival_time):
+    """Return journey duration in minutes, including next-day arrivals."""
     departure_minute = time_to_minutes(departure_time)
     arrival_minute = time_to_minutes(final_arrival_time)
 
@@ -293,6 +294,7 @@ def calculate_journey_minutes(departure_time, final_arrival_time):
 
 
 def get_default_ui_weights(scenario_data):
+    """Return scenario-specific weights when enabled, otherwise global defaults."""
     optimization = scenario_data.get("optimization", {})
 
     if optimization.get("consider_individual_scenario_weight", False):
@@ -305,13 +307,16 @@ def get_default_ui_weights(scenario_data):
 
 
 def is_weight_changed(ui_weights, default_ui_weights):
+    """Check whether UI weights differ from the default values."""
     return any(
-        abs(float(ui_weights[weight_name]) - float(default_ui_weights[weight_name])) > 0.0001
+        abs(float(ui_weights[weight_name]) - float(default_ui_weights[weight_name]))
+        > 0.0001
         for weight_name in OPTIMIZATION_WEIGHTS
     )
 
 
 def build_bus_rows(result):
+    """Build Streamlit table rows for the bus timetable."""
     return [
         {
             "Bus ID": bus["bus_id"],
@@ -334,19 +339,27 @@ def build_bus_rows(result):
 
 
 def build_operator_rows(summary):
+    """Build Streamlit table rows for operator metrics."""
     return [
         {
             "Operator": operator_id,
             "Bus Count": summary["operator_bus_count"].get(operator_id, 0),
-            "Total Wait Minutes": summary["operator_total_wait_minutes"].get(operator_id, 0),
-            "Average Wait Minutes": summary["operator_average_wait_minutes"].get(operator_id, 0),
-            "Max Wait Minutes": summary["operator_max_wait_minutes"].get(operator_id, 0),
+            "Total Wait Minutes": summary["operator_total_wait_minutes"].get(
+                operator_id, 0
+            ),
+            "Average Wait Minutes": summary["operator_average_wait_minutes"].get(
+                operator_id, 0
+            ),
+            "Max Wait Minutes": summary["operator_max_wait_minutes"].get(
+                operator_id, 0
+            ),
         }
         for operator_id in summary["operator_average_wait_minutes"]
     ]
 
 
 def build_station_rows(summary):
+    """Build Streamlit table rows for station metrics."""
     return [
         {
             "Station": station_id,
@@ -364,13 +377,14 @@ def build_station_rows(summary):
     ]
 
 
-
 @st.cache_data(show_spinner=False)
 def build_cached_excel_report(result):
+    """Cache report generation so downloading does not re-run optimization."""
     return build_excel_report(result)
 
 
 def get_dynamic_failures():
+    """Return configured runtime failures that trigger re-optimization."""
     if not OPERATIONAL_FAILURE_SETTINGS.get(
         "include_operational_failures",
         False,
@@ -392,6 +406,7 @@ def get_dynamic_failures():
 
 
 def build_dynamic_failure_rows():
+    """Build Streamlit rows for configured runtime failures."""
     return [
         {
             "Failure ID": failure.get("operational_failure_id"),
@@ -407,18 +422,17 @@ def build_dynamic_failure_rows():
 
 
 def build_reoptimization_phase_rows(result):
+    """Build display rows for each CP-SAT re-optimization phase."""
     reoptimization_summary = result.get("reoptimization_summary", {})
 
     return [
         {
             "Phase": phase.get("phase"),
             "Trigger Time": phase.get("trigger_time") or "-",
-            "Triggered Failure": (
-                phase.get("triggered_failure", {}) or {}
-            ).get("operational_failure_id", "-"),
-            "Failure Type": (
-                phase.get("triggered_failure", {}) or {}
-            ).get("type", "-"),
+            "Triggered Failure": (phase.get("triggered_failure", {}) or {}).get(
+                "operational_failure_id", "-"
+            ),
+            "Failure Type": (phase.get("triggered_failure", {}) or {}).get("type", "-"),
             "Active Failure IDs": ", ".join(phase.get("active_failure_ids", [])),
             "Frozen Decisions": phase.get("frozen_decision_count", 0),
             "Status": phase.get("status"),
@@ -430,6 +444,7 @@ def build_reoptimization_phase_rows(result):
 
 
 def render_reoptimization_timeline(result):
+    """Render the failure injection and re-optimization trace in the UI."""
     reoptimization_summary = result.get("reoptimization_summary")
 
     if not reoptimization_summary:
@@ -477,8 +492,7 @@ def render_reoptimization_timeline(result):
             ]
 
         details_html = "".join(
-            f'<div class="reopt-card-text">{detail}</div>'
-            for detail in details
+            f'<div class="reopt-card-text">{detail}</div>' for detail in details
         )
 
         st.markdown(
@@ -508,10 +522,7 @@ if not scenario_files:
     st.stop()
 
 
-scenario_names = [
-    scenario_file.name
-    for scenario_file in scenario_files
-]
+scenario_names = [scenario_file.name for scenario_file in scenario_files]
 
 
 selected_scenario_name = st.sidebar.selectbox(
@@ -548,7 +559,9 @@ for weight_name in OPTIMIZATION_WEIGHTS:
         label=weight_name,
         min_value=0.0,
         max_value=3.0,
-        value=float(default_ui_weights.get(weight_name, OPTIMIZATION_WEIGHTS[weight_name])),
+        value=float(
+            default_ui_weights.get(weight_name, OPTIMIZATION_WEIGHTS[weight_name])
+        ),
         step=0.1,
         format="%.1f",
         key=f"{selected_scenario_name}_{weight_name}",
@@ -583,10 +596,7 @@ has_cached_result = (
     and st.session_state.get("scheduler_run_key") == current_run_key
 )
 
-should_run_scheduler = (
-    run_scheduler
-    or not has_cached_result
-)
+should_run_scheduler = run_scheduler or not has_cached_result
 
 
 st.sidebar.markdown("### Configuration")
@@ -610,19 +620,19 @@ operational_failures_enabled = OPERATIONAL_FAILURE_SETTINGS.get(
 )
 
 if operational_failures_enabled:
-    st.sidebar.warning(
-        f"Enabled | {len(OPERATIONAL_FAILURES)} configured"
-    )
+    st.sidebar.warning(f"Enabled | {len(OPERATIONAL_FAILURES)} configured")
 else:
     st.sidebar.success("Disabled")
 
 
-input_data_tab, summary_tab, station_order_tab, other_metrics_tab = st.tabs([
-    "Input Data Structure",
-    "Summary & Bus Timetable",
-    "Station Charging Orders",
-    "Other Metrics",
-])
+input_data_tab, summary_tab, station_order_tab, other_metrics_tab = st.tabs(
+    [
+        "Input Data Structure",
+        "Summary & Bus Timetable",
+        "Station Charging Orders",
+        "Other Metrics",
+    ]
+)
 
 
 with input_data_tab:
@@ -630,18 +640,20 @@ with input_data_tab:
 
     st.markdown("### 1. Global Configuration")
 
-    config_tabs = st.tabs([
-        "Bus Config",
-        "Charger Config",
-        "Optimization Weights",
-        "Solver Config",
-        "Routes",
-        "Stations",
-        "Operators",
-        "Operational Failures",
-        "Re-optimization",
-        "Selected UI Weights",
-    ])
+    config_tabs = st.tabs(
+        [
+            "Bus Config",
+            "Charger Config",
+            "Optimization Weights",
+            "Solver Config",
+            "Routes",
+            "Stations",
+            "Operators",
+            "Operational Failures",
+            "Re-optimization",
+            "Selected UI Weights",
+        ]
+    )
 
     with config_tabs[0]:
         st.json(BUS_CONFIG)
@@ -875,9 +887,7 @@ with summary_tab:
     st.subheader("Per-Bus Charging Details")
 
     for bus in result["bus_timetables"]:
-        with st.expander(
-            f"{bus['bus_id']} | {bus['operator_id']}"
-        ):
+        with st.expander(f"{bus['bus_id']} | {bus['operator_id']}"):
             charging_events_df = pd.DataFrame(
                 bus["charging_events"],
             )
@@ -903,15 +913,10 @@ with station_order_tab:
 
     st.subheader("Station Charging Orders")
 
-    station_ids = list(
-        result["station_charging_orders"].keys()
-    )
+    station_ids = list(result["station_charging_orders"].keys())
 
     if station_ids:
-        station_tabs = st.tabs([
-            f"Station {station_id}"
-            for station_id in station_ids
-        ])
+        station_tabs = st.tabs([f"Station {station_id}" for station_id in station_ids])
 
         for tab, station_id in zip(station_tabs, station_ids):
             with tab:
@@ -931,13 +936,15 @@ with station_order_tab:
 with other_metrics_tab:
     st.subheader("Simulation Window")
 
-    simulation_window_df = pd.DataFrame([
-        {
-            "Start Time": summary["simulation_start_time"],
-            "End Time": summary["simulation_end_time"],
-            "Duration Minutes": summary["simulation_duration_minutes"],
-        }
-    ])
+    simulation_window_df = pd.DataFrame(
+        [
+            {
+                "Start Time": summary["simulation_start_time"],
+                "End Time": summary["simulation_end_time"],
+                "Duration Minutes": summary["simulation_duration_minutes"],
+            }
+        ]
+    )
 
     st.dataframe(
         simulation_window_df,
@@ -972,7 +979,9 @@ with other_metrics_tab:
             hide_index=True,
         )
     else:
-        st.info("No dynamic failures configured. CHARGER_DOWN and SLOW_CHARGING trigger event-driven re-optimization.")
+        st.info(
+            "No dynamic failures configured. CHARGER_DOWN and SLOW_CHARGING trigger event-driven re-optimization."
+        )
 
     render_reoptimization_timeline(result)
 

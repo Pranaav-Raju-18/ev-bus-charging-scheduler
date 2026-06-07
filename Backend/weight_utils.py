@@ -1,7 +1,11 @@
+"""Optimization weight resolution for global, scenario, and UI overrides."""
+
 from Backend.configurations import OPTIMIZATION_WEIGHTS
 
 
 class WeightUtilsMixin:
+    """Resolve and validate optimization weights from config, scenario, and UI inputs."""
+
     def _get_weights(self):
         optimization = self.scenario.get("optimization", {})
 
@@ -46,6 +50,4 @@ class WeightUtilsMixin:
                 )
 
     def _weight(self, weight_name, default_value=0):
-        return int(
-            round(self.weights.get(weight_name, default_value) * 100)
-        )
+        return int(round(self.weights.get(weight_name, default_value) * 100))

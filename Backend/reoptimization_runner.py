@@ -1,4 +1,9 @@
+"""Event-driven CP-SAT re-optimization flow for runtime failure injection."""
+
+
 class ReoptimizationRunnerMixin:
+    """Run the initial schedule and re-solve when dynamic failures are injected."""
+
     def _should_use_event_driven_reoptimization(self):
         if not self.reoptimization_enabled:
             return False
@@ -27,16 +32,22 @@ class ReoptimizationRunnerMixin:
         if current_result["status"] == "NO_SOLUTION":
             return current_result
 
-        phases = [{
-            "phase": "initial_plan",
-            "trigger_time": None,
-            "triggered_failure": None,
-            "active_failure_ids": sorted(planned_ids),
-            "frozen_decision_count": 0,
-            "status": current_result["status"],
-            "total_wait_minutes": current_result["summary"].get("total_wait_minutes", 0),
-            "solver_wall_time_seconds": current_result.get("solver_wall_time_seconds", 0),
-        }]
+        phases = [
+            {
+                "phase": "initial_plan",
+                "trigger_time": None,
+                "triggered_failure": None,
+                "active_failure_ids": sorted(planned_ids),
+                "frozen_decision_count": 0,
+                "status": current_result["status"],
+                "total_wait_minutes": current_result["summary"].get(
+                    "total_wait_minutes", 0
+                ),
+                "solver_wall_time_seconds": current_result.get(
+                    "solver_wall_time_seconds", 0
+                ),
+            }
+        ]
 
         active_dynamic_ids = set()
 
@@ -66,23 +77,31 @@ class ReoptimizationRunnerMixin:
                 phase_name=f"Re-optimized after {failure['operational_failure_id']}",
             )
 
-            phases.append({
-                "phase": "reoptimized_plan",
-                "trigger_time": self._minutes_to_time(failure_start_minute),
-                "trigger_minute": failure_start_minute,
-                "triggered_failure": {
-                    "operational_failure_id": failure["operational_failure_id"],
-                    "type": failure["type"],
-                    "station_id": failure.get("station_id"),
-                    "charger_id": failure.get("charger_id"),
-                    "reason": failure.get("reason"),
-                },
-                "active_failure_ids": sorted(active_failure_ids),
-                "frozen_decision_count": self._count_frozen_decisions(fixed_schedule),
-                "status": next_result["status"],
-                "total_wait_minutes": next_result.get("summary", {}).get("total_wait_minutes", 0),
-                "solver_wall_time_seconds": next_result.get("solver_wall_time_seconds", 0),
-            })
+            phases.append(
+                {
+                    "phase": "reoptimized_plan",
+                    "trigger_time": self._minutes_to_time(failure_start_minute),
+                    "trigger_minute": failure_start_minute,
+                    "triggered_failure": {
+                        "operational_failure_id": failure["operational_failure_id"],
+                        "type": failure["type"],
+                        "station_id": failure.get("station_id"),
+                        "charger_id": failure.get("charger_id"),
+                        "reason": failure.get("reason"),
+                    },
+                    "active_failure_ids": sorted(active_failure_ids),
+                    "frozen_decision_count": self._count_frozen_decisions(
+                        fixed_schedule
+                    ),
+                    "status": next_result["status"],
+                    "total_wait_minutes": next_result.get("summary", {}).get(
+                        "total_wait_minutes", 0
+                    ),
+                    "solver_wall_time_seconds": next_result.get(
+                        "solver_wall_time_seconds", 0
+                    ),
+                }
+            )
 
             if next_result["status"] == "NO_SOLUTION":
                 current_result["reoptimization_summary"] = self._reoptimization_summary(
@@ -97,14 +116,18 @@ class ReoptimizationRunnerMixin:
             phases=phases,
             final_strategy="event_driven_cp_sat_reoptimization",
         )
-        current_result["operational_failures_applied"] = self._operational_failures_summary()
+        current_result["operational_failures_applied"] = (
+            self._operational_failures_summary()
+        )
         return current_result
 
     def _planned_operational_failures(self):
-        planned_types = set(self.reoptimization_config.get(
-            "planned_failure_types",
-            ["STATION_CAPACITY_REDUCTION"],
-        ))
+        planned_types = set(
+            self.reoptimization_config.get(
+                "planned_failure_types",
+                ["STATION_CAPACITY_REDUCTION"],
+            )
+        )
 
         return [
             failure
@@ -113,10 +136,12 @@ class ReoptimizationRunnerMixin:
         ]
 
     def _dynamic_operational_failures(self):
-        dynamic_types = set(self.reoptimization_config.get(
-            "dynamic_failure_types",
-            ["CHARGER_DOWN", "SLOW_CHARGING"],
-        ))
+        dynamic_types = set(
+            self.reoptimization_config.get(
+                "dynamic_failure_types",
+                ["CHARGER_DOWN", "SLOW_CHARGING"],
+            )
+        )
 
         return sorted(
             [
@@ -157,28 +182,31 @@ class ReoptimizationRunnerMixin:
                 )
 
                 if started_at_minute < freeze_minute:
-                    fixed_events.append({
-                        "station_id": event["station_id"],
-                        "start": started_at_minute,
-                        "end": ended_at_minute,
-                        "wait": started_at_minute - reached_at_minute,
-                    })
+                    fixed_events.append(
+                        {
+                            "station_id": event["station_id"],
+                            "start": started_at_minute,
+                            "end": ended_at_minute,
+                            "wait": started_at_minute - reached_at_minute,
+                        }
+                    )
 
             fixed_schedule[bus["bus_id"]] = {
                 "plan": list(bus["charging_plan"]),
                 "events": fixed_events,
                 "min_future_start_minute": freeze_minute,
-                "final_arrival_minute": final_arrival_minute
-                if final_arrival_minute <= freeze_minute
-                else None,
+                "final_arrival_minute": (
+                    final_arrival_minute
+                    if final_arrival_minute <= freeze_minute
+                    else None
+                ),
             }
 
         return fixed_schedule
 
     def _count_frozen_decisions(self, fixed_schedule):
         return sum(
-            1 + len(details.get("events", []))
-            for details in fixed_schedule.values()
+            1 + len(details.get("events", [])) for details in fixed_schedule.values()
         )
 
     def _reoptimization_summary(self, phases, final_strategy):

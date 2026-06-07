@@ -1,4 +1,9 @@
+"""Time conversion helpers used across scheduling and reporting."""
+
+
 class TimeUtilsMixin:
+    """Provide HH:MM to minute conversion and display formatting."""
+
     @staticmethod
     def _time_to_minutes(time_text):
         hour, minute = map(int, time_text.split(":"))
