@@ -473,8 +473,7 @@ def build_station_rows(summary) -> list[dict]:
 
 
 
-@st.cache_data(show_spinner=False)
-def build_cached_excel_report(result) -> bytes:
+def build_excel_report_for_download(result) -> bytes:
     """Build the Excel report without re-running the optimizer.
     
     Args:
@@ -709,42 +708,14 @@ run_scheduler = st.sidebar.button(
     use_container_width=True,
 )
 
-if run_scheduler:
-    st.session_state.pop("scheduler_result", None)
-    st.session_state.pop("scheduler_run_key", None)
-
-    for tab in [
-        "summary_tab",
-        "station_order_tab",
-        "other_metrics_tab",
-    ]:
-        st.empty()
-
-
 weights_changed = is_weight_changed(
     ui_weights,
     default_ui_weights,
 )
 
-current_run_key = {
-    "scenario": selected_scenario_name,
-    "weights": ui_weights,
-    "operational_failures_enabled": OPERATIONAL_FAILURE_SETTINGS.get(
-        "include_operational_failures",
-        False,
-    ),
-    "operational_failures": OPERATIONAL_FAILURES,
-    "reoptimization": REOPTIMIZATION_CONFIG,
-}
-
-has_cached_result = (
-    "scheduler_result" in st.session_state
-    and st.session_state.get("scheduler_run_key") == current_run_key
-)
-
 should_run_scheduler = (
-    run_scheduler
-    or not has_cached_result
+    not weights_changed
+    or run_scheduler
 )
 
 
@@ -844,7 +815,7 @@ with input_data_tab:
     st.json(scenario_data)
 
 
-if weights_changed and not run_scheduler and not has_cached_result:
+if not should_run_scheduler:
     with summary_tab:
         st.info(
             "Weights were adjusted. Click Run Scheduler from the sidebar to recalculate the schedule."
@@ -874,7 +845,6 @@ reoptimization_enabled = REOPTIMIZATION_CONFIG.get(
 
 if should_run_scheduler:
     optimizer_message = summary_loading_placeholder
-    st.session_state["scheduler_is_running"] = True
 
     with station_loading_placeholder.container():
         st.info(
@@ -953,23 +923,17 @@ if should_run_scheduler:
                     include_timeline=False,
                 )
 
-        st.session_state["scheduler_result"] = result
-        st.session_state["scheduler_run_key"] = current_run_key
-        st.session_state["scheduler_is_running"] = False
         optimizer_message.empty()
         summary_loading_placeholder.empty()
         station_loading_placeholder.empty()
         metrics_loading_placeholder.empty()
 
     except ValueError as error:
-        st.session_state["scheduler_is_running"] = False
         optimizer_message.empty()
         station_loading_placeholder.empty()
         metrics_loading_placeholder.empty()
         st.error(str(error))
         st.stop()
-else:
-    result = st.session_state["scheduler_result"]
 
 
 if result["status"] == "NO_SOLUTION":
@@ -1175,7 +1139,7 @@ with other_metrics_tab:
         hide_index=True,
     )
 
-    excel_file = build_cached_excel_report(result)
+    excel_file = build_excel_report_for_download(result)
 
     st.download_button(
         label="Download Excel Report",
