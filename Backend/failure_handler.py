@@ -1,208 +1,135 @@
-from collections import defaultdict
+"""Operational failures: how disruptions affect the chargers.
+
+Failures are optional (config.FAILURES_ENABLED). They come in two flavours:
+  * capacity loss - STATION_CAPACITY_REDUCTION / CHARGER_DOWN make fewer
+    chargers usable during a window; modelled as a block on the station,
+  * slow charging - SLOW_CHARGING makes charging at a station take longer
+    while the failure is active.
+
+Planned failures are known up front and enter the first solve. Dynamic
+failures are treated as surprises and trigger re-optimization.
+"""
 
 from Backend.configurations import (
-    CHARGER_CONFIG,
-    OPERATIONAL_FAILURE_SETTINGS,
-    OPERATIONAL_FAILURES,
+    CHARGE_MINUTES,
+    STATIONS,
+    FAILURES,
+    FAILURES_ENABLED,
+    PLANNED_FAILURE_TYPES,
+    DYNAMIC_FAILURE_TYPES,
 )
+from Backend.time_utils import TimeUtils
 
 
-class FailureHandler:
-    def _operational_failures(self) -> object:
-        """Apply operational failure logic to the schedule.
+class Failures:
+    """Stateless helpers that interpret the configured failure list."""
+
+    @staticmethod
+    def all():
+        """All configured failures, or none if failures are disabled.
+
+        Returns:
+            list[dict]: Failure definitions (see config.FAILURES).
         """
-        if not self._include_operational_failures():
-            return []
+        return list(FAILURES) if FAILURES_ENABLED else []
 
-        failures = self._all_enabled_operational_failures()
-        failure_filter = getattr(self, "failure_filter", None)
+    @staticmethod
+    def window(failure):
+        """Start and end of a failure in minutes past midnight.
 
-        if not failure_filter:
-            return failures
-
-        allowed_ids = failure_filter.get("operational_failure_ids")
-        allowed_types = failure_filter.get("types")
-
-        if allowed_ids is not None:
-            allowed_ids = set(allowed_ids)
-            failures = [
-                failure
-                for failure in failures
-                if failure.get("operational_failure_id") in allowed_ids
-            ]
-
-        if allowed_types is not None:
-            allowed_types = set(allowed_types)
-            failures = [
-                failure
-                for failure in failures
-                if failure.get("type") in allowed_types
-            ]
-
-        return failures
-
-    def _all_enabled_operational_failures(self) -> object:
-        """Apply operational failure logic to the schedule.
-        """
-        if not self._include_operational_failures():
-            return []
-
-        return OPERATIONAL_FAILURES
-
-    def _include_operational_failures(self) -> object:
-        """Apply operational failure logic to the schedule.
-        """
-        return OPERATIONAL_FAILURE_SETTINGS.get(
-            "include_operational_failures",
-            False,
-        )
-
-    def _failure_window_minutes(self, failure) -> tuple:
-        """Convert or compare minute-based timeline values.
-        
         Args:
-            failure (dict): Operational failure configuration dictionary.
+            failure (dict): A failure with 'start' and 'end' clock strings.
+
+        Returns:
+            tuple[int, int]: (start_minute, end_minute); end rolls to the next
+                day if it is not after start.
         """
-        earliest_departure = min(
-            self._time_to_minutes(bus["scheduled_departure_time"])
-            for bus in self.scenario["buses"]
-        )
+        start = TimeUtils.to_minutes(failure["start"])
+        end = TimeUtils.to_minutes(failure["end"])
+        if end <= start:
+            end += 24 * 60
+        return start, end
 
-        start_minute = self._time_to_minutes(failure["start_time"])
-        end_minute = self._time_to_minutes(failure["end_time"])
+    @staticmethod
+    def planned(active):
+        """Failures known in advance (folded into the first solve).
 
-        while start_minute < earliest_departure:
-            start_minute += 24 * 60
-            end_minute += 24 * 60
-
-        if end_minute <= start_minute:
-            end_minute += 24 * 60
-
-        return start_minute, end_minute
-
-    def _operational_failures_summary(self) -> dict:
-        """Apply operational failure logic to the schedule.
-        """
-        if not self._include_operational_failures():
-            return {
-                "enabled": False,
-                "failures": [],
-            }
-
-        failures = []
-
-        for failure in self._operational_failures():
-            start_minute, end_minute = self._failure_window_minutes(failure)
-
-            failures.append({
-                "operational_failure_id": failure.get("operational_failure_id"),
-                "type": failure.get("type"),
-                "station_id": failure.get("station_id"),
-                "charger_id": failure.get("charger_id"),
-                "start_time": failure.get("start_time"),
-                "end_time": failure.get("end_time"),
-                "start_minute": start_minute,
-                "end_minute": end_minute,
-                "available_chargers": failure.get("available_chargers"),
-                "charging_duration_minutes": failure.get("charging_duration_minutes"),
-                "affected_chargers": failure.get("affected_chargers"),
-                "reason": failure.get("reason"),
-            })
-
-        return {
-            "enabled": True,
-            "failures": failures,
-        }
-
-    def _slow_charging_operational_failures(self, station_id) -> list:
-        """Apply operational failure logic to the schedule.
-        
         Args:
-            station_id (str): Charging station identifier.
+            active (list[dict]): Failure definitions to split.
+
+        Returns:
+            list[dict]: Failures whose type is in PLANNED_FAILURE_TYPES.
         """
-        failures = [
-            failure
-            for failure in self._operational_failures()
-            if failure.get("type") == "SLOW_CHARGING"
-            and failure.get("station_id") == station_id
-        ]
+        return [f for f in active if f["type"] in PLANNED_FAILURE_TYPES]
 
-        return sorted(
-            failures,
-            key=lambda failure: self._failure_window_minutes(failure)[0],
-        )
+    @staticmethod
+    def dynamic(active):
+        """Failures treated as runtime surprises, ordered by start time.
 
-    def _normal_charging_time(self) -> object:
-        """Convert or compare schedule time values.
+        Args:
+            active (list[dict]): Failure definitions to split.
+
+        Returns:
+            list[dict]: Failures whose type is in DYNAMIC_FAILURE_TYPES,
+                sorted by start minute.
         """
-        return (
-            CHARGER_CONFIG["charging_duration_minutes"]
-            + CHARGER_CONFIG.get("charger_setup_duration_minutes", 0)
-        )
+        dynamic = [f for f in active if f["type"] in DYNAMIC_FAILURE_TYPES]
+        return sorted(dynamic, key=lambda f: Failures.window(f)[0])
 
-    def _max_charging_time(self) -> object:
-        """Convert or compare schedule time values.
+    @staticmethod
+    def blocked_chargers(failure):
+        """How many chargers a capacity failure removes.
+
+        Args:
+            failure (dict): A failure definition.
+
+        Returns:
+            int: Chargers made unavailable (0 if not a capacity failure).
         """
-        slow_durations = [
-            failure["charging_duration_minutes"]
-            + CHARGER_CONFIG.get("charger_setup_duration_minutes", 0)
-            for failure in self._operational_failures()
-            if failure.get("type") == "SLOW_CHARGING"
-        ]
+        if failure["type"] == "CHARGER_DOWN":
+            return 1
+        if failure["type"] == "STATION_CAPACITY_REDUCTION":
+            configured = STATIONS[failure["station"]]["chargers"]
+            return max(0, configured - failure["available_chargers"])
+        return 0
 
-        return max([self._normal_charging_time()] + slow_durations)
+    @staticmethod
+    def capacity_blocks(active, station):
+        """Blocking intervals at a station from active capacity failures.
 
-    def _charger_unavailable_windows(self) -> object:
-        """Build or validate charger availability and assignment data.
+        Args:
+            active (list[dict]): Currently active failures.
+            station (str): Station id to filter on.
+
+        Returns:
+            list[tuple[int, int, int]]: (start_minute, end_minute,
+                chargers_blocked) for each capacity failure at this station.
         """
-        unavailable_windows = defaultdict(list)
-
-        for failure in self._operational_failures():
-            failure_type = failure.get("type")
-            station_id = failure.get("station_id")
-
-            if station_id not in self.stations:
+        blocks = []
+        for failure in active:
+            if failure.get("station") != station:
                 continue
+            blocked = Failures.blocked_chargers(failure)
+            if blocked > 0:
+                start, end = Failures.window(failure)
+                blocks.append((start, end, blocked))
+        return blocks
 
-            start_minute, end_minute = self._failure_window_minutes(failure)
+    @staticmethod
+    def charge_minutes(active, station):
+        """Charging time at a station, accounting for slow charging.
 
-            if failure_type == "CHARGER_DOWN":
-                unavailable_windows[failure["charger_id"]].append(
-                    (start_minute, end_minute)
-                )
+        While a SLOW_CHARGING failure is active at a station, charges there
+        take the slow duration. Otherwise the normal CHARGE_MINUTES applies.
 
-            elif failure_type == "STATION_CAPACITY_REDUCTION":
-                configured_chargers = self.stations[station_id]["charger_count"]
-                available_chargers = failure["available_chargers"]
-                unavailable_count = max(0, configured_chargers - available_chargers)
-
-                for charger_number in range(
-                    configured_chargers - unavailable_count + 1,
-                    configured_chargers + 1,
-                ):
-                    charger_id = f"{station_id}-{charger_number}"
-                    unavailable_windows[charger_id].append(
-                        (start_minute, end_minute)
-                    )
-
-        return unavailable_windows
-
-    def _charger_has_conflict(
-        self,
-        charger_id,
-        start_minute,
-        end_minute,
-        unavailable_windows,
-    ) -> bool:
-        """Build or validate charger availability and assignment data.
-        
         Args:
-            charger_id (str): Physical charger identifier.
-            start_minute (int): Start time represented as timeline minutes.
-            end_minute (int): End time represented as timeline minutes.
-            unavailable_windows (_type_): Unavailable windows used by this function.
+            active (list[dict]): Currently active failures.
+            station (str): Station id being charged at.
+
+        Returns:
+            int: Charging duration in minutes for this station.
         """
-        return any(
-            start_minute < unavailable_end and end_minute > unavailable_start
-            for unavailable_start, unavailable_end in unavailable_windows.get(charger_id, [])
-        )
+        for failure in active:
+            if failure["type"] == "SLOW_CHARGING" and failure["station"] == station:
+                return failure["slow_minutes"]
+        return CHARGE_MINUTES
