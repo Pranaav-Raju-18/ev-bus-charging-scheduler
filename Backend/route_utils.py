@@ -1,86 +1,104 @@
-from Backend.configurations import BUS_CONFIG
+"""Route geometry: distances, travel times and feasible charging plans.
+
+A "charging plan" is the ordered set of stations a bus charges at. Because a
+bus can only drive BATTERY_RANGE_KM between charges, only some station
+combinations are valid. RouteMap returns the smallest valid combinations,
+since any extra charge only adds load to the shared chargers.
+"""
+
+from itertools import combinations
+
+from Backend.configurations import STATIONS, SPEED_KMPH, BATTERY_RANGE_KM
 
 
-class RouteUtilities:
-    def _distance_between(self, route, from_station, to_station) -> object:
-        """Calculate distance-related values.
-        
+class RouteMap:
+    """Stateless helpers that read a route definition (see config.ROUTES)."""
+
+    @staticmethod
+    def cumulative_km(route):
+        """Distance of every stop from the route's origin.
+
         Args:
-            route (_type_): Route used by this function.
-            from_station (_type_): From station used by this function.
-            to_station (_type_): To station used by this function.
-        """
-        cumulative = self._cumulative_distance(route)
-        return cumulative[to_station] - cumulative[from_station]
+            route (dict): Route with 'stops' (list[str]) and 'segment_km'
+                (list[int]).
 
-    def _travel_time_between(self, route, from_station, to_station) -> object:
-        """Convert or compare schedule time values.
-        
+        Returns:
+            dict[str, int]: Stop name -> kilometres from the origin.
+        """
+        distance = 0
+        result = {route["stops"][0]: 0}
+        for index, segment in enumerate(route["segment_km"]):
+            distance += segment
+            result[route["stops"][index + 1]] = distance
+        return result
+
+    @staticmethod
+    def distance_km(route, start_stop, end_stop):
+        """Kilometres between two stops on the same route.
+
         Args:
-            route (_type_): Route used by this function.
-            from_station (_type_): From station used by this function.
-            to_station (_type_): To station used by this function.
-        """
-        distance = self._distance_between(route, from_station, to_station)
-        return round((distance / BUS_CONFIG["speed_kmph"]) * 60)
+            route (dict): Route definition.
+            start_stop (str): Name of the earlier stop.
+            end_stop (str): Name of the later stop.
 
-    def _cumulative_distance(self, route) -> object:
-        """Calculate distance-related values.
-        
+        Returns:
+            int: Distance from start_stop to end_stop in km.
+        """
+        cumulative = RouteMap.cumulative_km(route)
+        return cumulative[end_stop] - cumulative[start_stop]
+
+    @staticmethod
+    def travel_minutes(route, start_stop, end_stop):
+        """Driving time between two stops at the constant speed.
+
         Args:
-            route (_type_): Route used by this function.
+            route (dict): Route definition.
+            start_stop (str): Name of the earlier stop.
+            end_stop (str): Name of the later stop.
+
+        Returns:
+            int: Minutes to drive from start_stop to end_stop.
         """
-        total_distance = 0
-        cumulative = {route["station_sequence"][0]: 0}
+        km = RouteMap.distance_km(route, start_stop, end_stop)
+        return round(km / SPEED_KMPH * 60)
 
-        for segment in route["station_distances_in_km"]:
-            total_distance += segment["distance_km"]
-            cumulative[segment["to_station"]] = total_distance
+    @staticmethod
+    def charging_plans(route):
+        """Smallest charging-station sets that keep the bus within range.
 
-        return cumulative
-
-    def _route_distance(self, route) -> object:
-        """Calculate route, station, or distance information.
-        
         Args:
-            route (_type_): Route used by this function.
+            route (dict): Route definition.
+
+        Returns:
+            list[list[str]]: Each inner list is an ordered charging plan; all
+                returned plans use the same (minimum) number of charges.
         """
-        return sum(
-            segment["distance_km"]
-            for segment in route["station_distances_in_km"]
-        )
+        stations = [stop for stop in route["stops"] if stop in STATIONS]
 
-    def _calculate_horizon(self) -> object:
-        """Handle calculate horizon logic.
+        feasible = []
+        for size in range(1, len(stations) + 1):
+            for combo in combinations(stations, size):
+                plan = [stop for stop in route["stops"] if stop in combo]
+                if RouteMap._within_range(route, plan):
+                    feasible.append(plan)
+            if feasible:                 # stop at the first size that works
+                break
+        return feasible
+
+    @staticmethod
+    def _within_range(route, plan):
+        """Check that no leg of a plan exceeds the battery range.
+
+        Args:
+            route (dict): Route definition.
+            plan (list[str]): Ordered charging stops between origin and end.
+
+        Returns:
+            bool: True if every leg is within BATTERY_RANGE_KM.
         """
-        latest_departure = max(
-            self._time_to_minutes(bus["scheduled_departure_time"])
-            for bus in self.scenario["buses"]
-        )
-
-        max_route_distance = max(
-            self._route_distance(route)
-            for route in self.routes.values()
-        )
-
-        route_time = round(
-            (max_route_distance / BUS_CONFIG["speed_kmph"]) * 60
-        )
-
-        max_charging_time = len(self.stations) * self._max_charging_time()
-
-        latest_operational_failure_end = max(
-            [
-                self._failure_window_minutes(failure)[1]
-                for failure in self._operational_failures()
-                if "end_time" in failure
-            ]
-            + [0]
-        )
-
-        waiting_buffer = 300
-
-        return max(
-            latest_departure + route_time + max_charging_time + waiting_buffer,
-            latest_operational_failure_end + route_time + max_charging_time + waiting_buffer,
+        checkpoints = [route["stops"][0]] + plan + [route["stops"][-1]]
+        return all(
+            RouteMap.distance_km(route, checkpoints[i], checkpoints[i + 1])
+            <= BATTERY_RANGE_KM
+            for i in range(len(checkpoints) - 1)
         )
