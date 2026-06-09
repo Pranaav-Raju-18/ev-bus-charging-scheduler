@@ -1,25 +1,33 @@
+"""Streamlit UI for the lightweight bus charging scheduler.
+
+Same look and layout as the main app (theme, sidebar, four tabs, metric cards,
+animated loader, re-optimization trace), but driven by the lightweight backend.
+The Input Data Structure tab shows the lightweight config.py values as raw JSON.
+"""
+
 import json
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
-from Backend.scheduler import BusChargingScheduler
-from Backend.report_generator import build_excel_report
-
 from Backend.configurations import (
-    CHARGER_CONFIG,
-    BUS_CONFIG,
-    OPTIMIZATION_WEIGHTS,
-    SOLVER_CONFIG,
-    ROUTES_CONFIG,
-    STATIONS_CONFIG,
-    OPERATORS_CONFIG,
-    OPERATIONAL_FAILURE_SETTINGS,
-    OPERATIONAL_FAILURES,
-    REOPTIMIZATION_CONFIG,
+    BATTERY_RANGE_KM,
+    CHARGE_MINUTES,
+    SPEED_KMPH,
+    ROUTES,
+    STATIONS,
+    OPERATORS,
+    WEIGHTS,
+    SOLVER,
+    FAILURES_ENABLED,
+    FAILURES,
+    PLANNED_FAILURE_TYPES,
+    DYNAMIC_FAILURE_TYPES,
 )
-
+from Backend.scenario_loader import Scenario
+from Backend.reoptimization_runner import Reoptimizer
+from Backend.report_generator import Report
 
 SCENARIO_FOLDER = Path("Backend/scenarios")
 
@@ -240,7 +248,7 @@ st.markdown(
             font-weight: 700;
             margin-bottom: 0.2rem;
         }
-    
+
         .reopt-card {
             border-left: 6px solid #F5B400;
             background-color: #F8F8F8;
@@ -271,7 +279,6 @@ st.markdown(
             box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
         }
 
-        
         .optimizer-loader-card {
             background-color: #F8F8F8;
             border-left: 6px solid #F5B400;
@@ -341,7 +348,6 @@ st.markdown(
                 left: calc(100% - 38px);
             }
         }
-
     </style>
     """,
     unsafe_allow_html=True,
@@ -349,66 +355,79 @@ st.markdown(
 
 
 def time_to_minutes(time_text) -> int:
-    """Convert HH:MM text into minutes from midnight.
-    
+    """Convert 'HH:MM' text into minutes from midnight.
+
     Args:
-        time_text (str): Time value in HH:MM format.
+        time_text (str): Time value in 'HH:MM' format.
+
+    Returns:
+        int: Minutes since 00:00.
     """
     hour, minute = map(int, time_text.split(":"))
     return hour * 60 + minute
 
 
-def calculate_journey_minutes(departure_time, final_arrival_time) -> int:
-    """Calculate total journey duration across midnight when needed.
-    
+def calculate_journey_minutes(departure_time, arrival_time) -> int:
+    """Total journey duration in minutes, rolling over midnight if needed.
+
     Args:
-        departure_time (str): Scheduled departure time in HH:MM format.
-        final_arrival_time (str): Final arrival time in HH:MM format.
+        departure_time (str): Departure clock 'HH:MM'.
+        arrival_time (str): Final arrival clock 'HH:MM'.
+
+    Returns:
+        int: Minutes between departure and arrival.
     """
-    departure_minute = time_to_minutes(departure_time)
-    arrival_minute = time_to_minutes(final_arrival_time)
-
-    if arrival_minute < departure_minute:
-        arrival_minute += 24 * 60
-
-    return arrival_minute - departure_minute
+    departure = time_to_minutes(departure_time)
+    arrival = time_to_minutes(arrival_time)
+    if arrival < departure:
+        arrival += 24 * 60
+    return arrival - departure
 
 
-def get_default_ui_weights(scenario_data) -> dict:
-    """Resolve the default weights shown in the UI.
-    
+def build_summary(result) -> dict:
+    """Compute headline metrics from a lightweight schedule result.
+
     Args:
-        scenario_data (dict): Loaded scenario dictionary.
+        result (dict): Schedule from Reoptimizer.run / Scheduler.solve.
+
+    Returns:
+        dict: Aggregated metrics used by the Summary tab and others.
     """
-    optimization = scenario_data.get("optimization", {})
+    buses = result["buses"]
+    waits = [bus["total_wait_minutes"] for bus in buses]
+    stops = [len(bus["plan"]) for bus in buses]
+    journeys = [calculate_journey_minutes(bus["departure"], bus["arrival"]) for bus in buses]
+    total = len(buses)
 
-    if optimization.get("consider_individual_scenario_weight", False):
-        return {
-            **OPTIMIZATION_WEIGHTS,
-            **optimization.get("weights", {}),
-        }
+    starts = [time_to_minutes(bus["departure"]) for bus in buses]
+    ends = [time_to_minutes(bus["departure"]) + journey for bus, journey in zip(buses, journeys)]
+    start_minute = min(starts)
+    end_minute = max(ends)
 
-    return dict(OPTIMIZATION_WEIGHTS)
+    return {
+        "total_buses": total,
+        "total_wait": sum(waits),
+        "average_wait": round(sum(waits) / total, 2) if total else 0,
+        "max_wait": max(waits) if waits else 0,
+        "buses_with_wait": sum(1 for w in waits if w > 0),
+        "buses_with_wait_percent": round(sum(1 for w in waits if w > 0) / total * 100, 1) if total else 0,
+        "total_stops": sum(stops),
+        "average_stops": round(sum(stops) / total, 2) if total else 0,
+        "max_journey": max(journeys) if journeys else 0,
+        "start_time": f"{start_minute // 60 % 24:02d}:{start_minute % 60:02d}",
+        "end_time": f"{end_minute // 60 % 24:02d}:{end_minute % 60:02d}",
+        "duration": end_minute - start_minute,
+    }
 
 
-def is_weight_changed(ui_weights, default_ui_weights) -> bool:
-    """Check whether UI-selected weights differ from defaults.
-    
+def build_bus_rows(result) -> list:
+    """Rows for the bus timetable table.
+
     Args:
-        ui_weights (dict | None): Optimization weights selected from the Streamlit UI.
-        default_ui_weights (dict): Default UI weight values for the selected scenario.
-    """
-    return any(
-        abs(float(ui_weights[weight_name]) - float(default_ui_weights[weight_name])) > 0.0001
-        for weight_name in OPTIMIZATION_WEIGHTS
-    )
+        result (dict): Schedule result.
 
-
-def build_bus_rows(result) -> list[dict]:
-    """Build table rows for the bus timetable view.
-    
-    Args:
-        result (dict): Final scheduler result dictionary.
+    Returns:
+        list[dict]: One row per bus.
     """
     return [
         {
@@ -417,74 +436,95 @@ def build_bus_rows(result) -> list[dict]:
             "Route": bus["route_id"],
             "Origin": bus["origin"],
             "Destination": bus["destination"],
-            "Departure": bus["departure_time"],
-            "Charging Plan": " → ".join(bus["charging_plan"]),
+            "Departure": bus["departure"],
+            "Charging Plan": " -> ".join(bus["plan"]),
             "Wait Minutes": bus["total_wait_minutes"],
-            "Charging Stops": bus["total_charging_stops"],
-            "Final Arrival": bus["final_arrival_time"],
-            "Journey Minutes": calculate_journey_minutes(
-                bus["departure_time"],
-                bus["final_arrival_time"],
-            ),
+            "Charging Stops": len(bus["plan"]),
+            "Final Arrival": bus["arrival"],
+            "Journey Minutes": calculate_journey_minutes(bus["departure"], bus["arrival"]),
         }
-        for bus in result["bus_timetables"]
+        for bus in result["buses"]
     ]
 
 
-def build_operator_rows(summary) -> list[dict]:
-    """Build table rows for operator-level metrics.
-    
+def build_operator_rows(result) -> list:
+    """Rows for operator-level metrics.
+
     Args:
-        summary (dict): Computed summary metrics dictionary.
+        result (dict): Schedule result.
+
+    Returns:
+        list[dict]: One row per operator that has buses.
     """
+    waits = {}
+    for bus in result["buses"]:
+        waits.setdefault(bus["operator_id"], []).append(bus["total_wait_minutes"])
     return [
         {
             "Operator": operator_id,
-            "Bus Count": summary["operator_bus_count"].get(operator_id, 0),
-            "Total Wait Minutes": summary["operator_total_wait_minutes"].get(operator_id, 0),
-            "Average Wait Minutes": summary["operator_average_wait_minutes"].get(operator_id, 0),
-            "Max Wait Minutes": summary["operator_max_wait_minutes"].get(operator_id, 0),
+            "Bus Count": len(values),
+            "Total Wait Minutes": sum(values),
+            "Average Wait Minutes": round(sum(values) / len(values), 2),
+            "Max Wait Minutes": max(values),
         }
-        for operator_id in summary["operator_average_wait_minutes"]
+        for operator_id, values in waits.items()
     ]
 
 
-def build_station_rows(summary) -> list[dict]:
-    """Build table rows for station-level metrics.
-    
+def build_station_rows(result) -> list:
+    """Rows for station-level metrics.
+
     Args:
-        summary (dict): Computed summary metrics dictionary.
+        result (dict): Schedule result.
+
+    Returns:
+        list[dict]: One row per station.
     """
+    duration = build_summary(result)["duration"]
+    rows = []
+    for station_id in STATIONS:
+        sessions = result["stations"].get(station_id, [])
+        waits = [event["wait_minutes"] for event in sessions]
+        chargers = STATIONS[station_id]["chargers"]
+        charging_minutes = len(sessions) * CHARGE_MINUTES
+        capacity_minutes = chargers * duration if duration else 0
+        rows.append({
+            "Station": station_id,
+            "Chargers": chargers,
+            "Sessions": len(sessions),
+            "Total Wait Minutes": sum(waits),
+            "Average Wait Minutes": round(sum(waits) / len(waits), 2) if waits else 0,
+            "Max Wait Minutes": max(waits) if waits else 0,
+            "Total Charging Minutes": charging_minutes,
+            "Utilization %": round(charging_minutes / capacity_minutes * 100, 1) if capacity_minutes else 0,
+        })
+    return rows
+
+
+def build_dynamic_failure_rows() -> list:
+    """Rows for the configured dynamic failures.
+
+    Returns:
+        list[dict]: One row per dynamic failure (empty if failures disabled).
+    """
+    if not FAILURES_ENABLED:
+        return []
     return [
         {
-            "Station": station_id,
-            "Chargers": metrics["charger_count"],
-            "Sessions": metrics["total_charging_sessions"],
-            "Slow Charging Sessions": metrics.get("slow_charging_sessions", 0),
-            "Failure-Affected Sessions": metrics.get("operational_failure_sessions", 0),
-            "Total Wait Minutes": metrics["total_wait_minutes"],
-            "Average Wait Minutes": metrics["average_wait_minutes"],
-            "Max Wait Minutes": metrics["max_wait_minutes"],
-            "Total Charging Minutes": metrics["total_charging_minutes"],
-            "Utilization %": metrics["charger_utilization_percent"],
+            "Failure ID": failure.get("id"),
+            "Type": failure.get("type"),
+            "Station": failure.get("station"),
+            "Start Time": failure.get("start"),
+            "End Time": failure.get("end"),
+            "Reason": failure.get("reason", "-"),
         }
-        for station_id, metrics in summary["station_metrics"].items()
+        for failure in FAILURES
+        if failure.get("type") in DYNAMIC_FAILURE_TYPES
     ]
-
-
-
-@st.cache_data(show_spinner=False)
-def build_cached_excel_report(result) -> bytes:
-    """Build the Excel report without re-running the optimizer.
-    
-    Args:
-        result (dict): Final scheduler result dictionary.
-    """
-    return build_excel_report(result)
 
 
 def render_optimizer_loader(message) -> None:
-    """Render an animated bus loader while CP-SAT is running.
+    """Show the animated bus loader while CP-SAT runs.
 
     Args:
         message (str): Short status message shown above the animation.
@@ -504,115 +544,31 @@ def render_optimizer_loader(message) -> None:
     )
 
 
-def get_dynamic_failures() -> list[dict]:
-    """Return failures that should be injected during runtime re-optimization.
-    """
-    if not OPERATIONAL_FAILURE_SETTINGS.get(
-        "include_operational_failures",
-        False,
-    ):
-        return []
+def render_reoptimization_trace(result) -> None:
+    """Render the re-optimization phases as cards.
 
-    dynamic_failure_types = set(
-        REOPTIMIZATION_CONFIG.get(
-            "dynamic_failure_types",
-            ["CHARGER_DOWN", "SLOW_CHARGING"],
-        )
-    )
-
-    return [
-        failure
-        for failure in OPERATIONAL_FAILURES
-        if failure.get("type") in dynamic_failure_types
-    ]
-
-
-def build_dynamic_failure_rows() -> list[dict]:
-    """Build table rows for configured dynamic failures.
-    """
-    return [
-        {
-            "Failure ID": failure.get("operational_failure_id"),
-            "Type": failure.get("type"),
-            "Station": failure.get("station_id"),
-            "Charger": failure.get("charger_id", "-"),
-            "Start Time": failure.get("start_time"),
-            "End Time": failure.get("end_time"),
-            "Reason": failure.get("reason", "-"),
-        }
-        for failure in get_dynamic_failures()
-    ]
-
-
-def build_reoptimization_phase_rows(result) -> list[dict]:
-    """Build table rows for every re-optimization phase.
-    
     Args:
-        result (dict): Final scheduler result dictionary.
+        result (dict): Schedule result with a 'phases' list.
     """
-    reoptimization_summary = result.get("reoptimization_summary", {})
+    phases = result.get("phases", [])
 
-    return [
-        {
-            "Phase": phase.get("phase"),
-            "Trigger Time": phase.get("trigger_time") or "-",
-            "Triggered Failure": (
-                phase.get("triggered_failure", {}) or {}
-            ).get("operational_failure_id", "-"),
-            "Failure Type": (
-                phase.get("triggered_failure", {}) or {}
-            ).get("type", "-"),
-            "Active Failure IDs": ", ".join(phase.get("active_failure_ids", [])),
-            "Frozen Decisions": phase.get("frozen_decision_count", 0),
-            "Status": phase.get("status"),
-            "Total Wait Minutes": phase.get("total_wait_minutes"),
-            "Solver Time Seconds": phase.get("solver_wall_time_seconds"),
-        }
-        for phase in reoptimization_summary.get("phases", [])
-    ]
-
-
-def render_reoptimization_timeline(result) -> None:
-    """Render the dynamic failure injection trace in Streamlit.
-    
-    Args:
-        result (dict): Final scheduler result dictionary.
-    """
-    reoptimization_summary = result.get("reoptimization_summary")
-
-    if not reoptimization_summary:
+    if len(phases) <= 1:
         st.info(
             "Event-driven re-optimization did not run for this scenario. "
-            "Enable CHARGER_DOWN or SLOW_CHARGING in the configured operational failures to trigger it."
+            "Enable CHARGER_DOWN or SLOW_CHARGING in config.FAILURES to trigger it."
         )
         return
 
     st.markdown("### Event-driven CP-SAT Re-optimization Trace")
 
-    st.info(
-        "This trace shows the dynamic failure being injected during the logical run. "
-        "The first CP-SAT phase creates the initial plan. When the configured dynamic failure time is reached, "
-        "the failure is injected and CP-SAT re-solves the remaining schedule."
-    )
-
-    for index, phase in enumerate(reoptimization_summary.get("phases", []), start=1):
-        triggered_failure = phase.get("triggered_failure")
-
-        if triggered_failure:
+    for index, phase in enumerate(phases, start=1):
+        if phase.get("failure_id"):
             card_class = "reopt-injection-card"
-            title = (
-                f"Phase {index}: Failure injected at {phase.get('trigger_time')} "
-                f"→ {triggered_failure.get('type')}"
-            )
+            title = f"Phase {index}: Failure injected at {phase.get('trigger_time')} -> {phase.get('failure_type')}"
             details = [
-                f"Failure ID: {triggered_failure.get('operational_failure_id')}",
-                f"Station: {triggered_failure.get('station_id')}",
-                f"Charger: {triggered_failure.get('charger_id', '-')}",
-                f"Reason: {triggered_failure.get('reason', '-')}",
-                f"Frozen decisions before failure time: {phase.get('frozen_decision_count', 0)}",
+                f"Failure ID: {phase.get('failure_id')}",
                 f"Re-optimized status: {phase.get('status')}",
                 f"Re-optimized total wait: {phase.get('total_wait_minutes')} minutes",
-                f"Re-solve time: {phase.get('solver_wall_time_seconds')} seconds",
             ]
         else:
             card_class = "reopt-card"
@@ -620,34 +576,22 @@ def render_reoptimization_timeline(result) -> None:
             details = [
                 f"Status: {phase.get('status')}",
                 f"Initial total wait: {phase.get('total_wait_minutes')} minutes",
-                f"Solve time: {phase.get('solver_wall_time_seconds')} seconds",
                 "Dynamic failures are not considered in this initial phase.",
             ]
 
-        details_html = "".join(
-            f'<div class="reopt-card-text">{detail}</div>'
-            for detail in details
-        )
-
+        details_html = "".join(f'<div class="reopt-card-text">{detail}</div>' for detail in details)
         st.markdown(
-            f"""
-            <div class="{card_class}">
-                <div class="reopt-card-title">{title}</div>
-                {details_html}
-            </div>
-            """,
+            f'<div class="{card_class}"><div class="reopt-card-title">{title}</div>{details_html}</div>',
             unsafe_allow_html=True,
         )
 
-    st.dataframe(
-        pd.DataFrame(build_reoptimization_phase_rows(result)),
-        use_container_width=True,
-        hide_index=True,
-    )
 
+# --- Title -----------------------------------------------------------------
 
 st.title("Bus Charging Scheduler")
 
+
+# --- Sidebar ---------------------------------------------------------------
 
 scenario_files = sorted(SCENARIO_FOLDER.glob("*.json"))
 
@@ -655,126 +599,53 @@ if not scenario_files:
     st.error("No scenario files found in Backend/scenarios.")
     st.stop()
 
-
-scenario_names = [
-    scenario_file.name
-    for scenario_file in scenario_files
-]
-
-
-selected_scenario_name = st.sidebar.selectbox(
-    "Select Scenario",
-    scenario_names,
-)
-
-
+scenario_names = [path.name for path in scenario_files]
+selected_scenario_name = st.sidebar.selectbox("Select Scenario", scenario_names)
 selected_scenario_path = SCENARIO_FOLDER / selected_scenario_name
 
+with open(selected_scenario_path) as handle:
+    scenario_data = json.load(handle)
 
-with open(selected_scenario_path, "r") as file:
-    scenario_data = json.load(file)
-
-
-default_ui_weights = get_default_ui_weights(scenario_data)
-
+scenario = Scenario.load(str(selected_scenario_path))
 
 st.sidebar.markdown("### Selected Scenario")
-st.sidebar.write(
-    scenario_data.get(
-        "scenario_name",
-        selected_scenario_name,
-    )
-)
-
+st.sidebar.write(scenario.name)
 
 st.sidebar.markdown("### Optimization Weights")
-
 ui_weights = {}
-
-for weight_name in OPTIMIZATION_WEIGHTS:
+for weight_name in WEIGHTS:
     ui_weights[weight_name] = st.sidebar.slider(
         label=weight_name,
         min_value=0.0,
         max_value=3.0,
-        value=float(default_ui_weights.get(weight_name, OPTIMIZATION_WEIGHTS[weight_name])),
+        value=float(scenario.weights.get(weight_name, WEIGHTS[weight_name])),
         step=0.1,
         format="%.1f",
         key=f"{selected_scenario_name}_{weight_name}",
     )
+scenario.weights = ui_weights
 
-
-run_scheduler = st.sidebar.button(
-    "Run Scheduler",
-    type="primary",
-    use_container_width=True,
-)
-
-if run_scheduler:
-    st.session_state.pop("scheduler_result", None)
-    st.session_state.pop("scheduler_run_key", None)
-
-    for tab in [
-        "summary_tab",
-        "station_order_tab",
-        "other_metrics_tab",
-    ]:
-        st.empty()
-
-
-weights_changed = is_weight_changed(
-    ui_weights,
-    default_ui_weights,
-)
-
-current_run_key = {
-    "scenario": selected_scenario_name,
-    "weights": ui_weights,
-    "operational_failures_enabled": OPERATIONAL_FAILURE_SETTINGS.get(
-        "include_operational_failures",
-        False,
-    ),
-    "operational_failures": OPERATIONAL_FAILURES,
-    "reoptimization": REOPTIMIZATION_CONFIG,
-}
-
-has_cached_result = (
-    "scheduler_result" in st.session_state
-    and st.session_state.get("scheduler_run_key") == current_run_key
-)
-
-should_run_scheduler = (
-    run_scheduler
-    or not has_cached_result
-)
-
+run_scheduler = st.sidebar.button("Run Scheduler", type="primary", use_container_width=True)
 
 st.sidebar.markdown("### Configuration")
-
 st.sidebar.markdown(
     f"""
     <div class="sidebar-config-card">
         <div class="sidebar-config-title">Solver Time</div>
-        <div class="sidebar-config-text">Max solve time: {SOLVER_CONFIG["max_solve_time_seconds"]} seconds</div>
+        <div class="sidebar-config-text">Max solve time: {SOLVER["max_seconds"]} seconds</div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-
 st.sidebar.markdown("### Operational Failures")
-
-operational_failures_enabled = OPERATIONAL_FAILURE_SETTINGS.get(
-    "include_operational_failures",
-    False,
-)
-
-if operational_failures_enabled:
-    st.sidebar.warning(
-        f"Enabled | {len(OPERATIONAL_FAILURES)} configured"
-    )
+if FAILURES_ENABLED:
+    st.sidebar.warning(f"Enabled | {len(FAILURES)} configured")
 else:
     st.sidebar.success("Disabled")
 
+
+# --- Tabs ------------------------------------------------------------------
 
 input_data_tab, summary_tab, station_order_tab, other_metrics_tab = st.tabs([
     "Input Data Structure",
@@ -783,403 +654,191 @@ input_data_tab, summary_tab, station_order_tab, other_metrics_tab = st.tabs([
     "Other Metrics",
 ])
 
-summary_loading_placeholder = summary_tab.empty()
-station_loading_placeholder = station_order_tab.empty()
-metrics_loading_placeholder = other_metrics_tab.empty()
-
 
 with input_data_tab:
     st.subheader("Input Data Structure")
-
-    st.markdown("### 1. Global Configuration")
+    st.markdown("### 1. Global Configuration (config.py)")
 
     config_tabs = st.tabs([
-        "Bus Config",
-        "Charger Config",
+        "Battery & Charging",
         "Optimization Weights",
-        "Solver Config",
+        "Solver",
         "Routes",
         "Stations",
         "Operators",
         "Operational Failures",
-        "Re-optimization",
         "Selected UI Weights",
     ])
 
     with config_tabs[0]:
-        st.json(BUS_CONFIG)
-
+        st.json({
+            "battery_range_km": BATTERY_RANGE_KM,
+            "charge_minutes": CHARGE_MINUTES,
+            "speed_kmph": SPEED_KMPH,
+        })
     with config_tabs[1]:
-        st.json(CHARGER_CONFIG)
-
+        st.json(WEIGHTS)
     with config_tabs[2]:
-        st.json(OPTIMIZATION_WEIGHTS)
-
+        st.json(SOLVER)
     with config_tabs[3]:
-        st.json(SOLVER_CONFIG)
-
+        st.json(ROUTES)
     with config_tabs[4]:
-        st.json(ROUTES_CONFIG)
-
+        st.json(STATIONS)
     with config_tabs[5]:
-        st.json(STATIONS_CONFIG)
-
+        st.json(OPERATORS)
     with config_tabs[6]:
-        st.json(OPERATORS_CONFIG)
-
+        st.markdown("#### Failures Enabled")
+        st.json({"enabled": FAILURES_ENABLED,
+                 "planned_types": PLANNED_FAILURE_TYPES,
+                 "dynamic_types": DYNAMIC_FAILURE_TYPES})
+        st.markdown("#### Failure Data")
+        st.json(FAILURES)
     with config_tabs[7]:
-        st.markdown("#### Operational Failure Settings")
-        st.json(OPERATIONAL_FAILURE_SETTINGS)
-
-        st.markdown("#### Operational Failure Data")
-        st.json(OPERATIONAL_FAILURES)
-
-    with config_tabs[8]:
-        st.json(REOPTIMIZATION_CONFIG)
-
-    with config_tabs[9]:
         st.json(ui_weights)
 
     st.markdown("### 2. Selected Scenario File")
     st.json(scenario_data)
 
 
-if weights_changed and not run_scheduler and not has_cached_result:
-    with summary_tab:
-        st.info(
-            "Weights were adjusted. Click Run Scheduler from the sidebar to recalculate the schedule."
-        )
+# --- Run -------------------------------------------------------------------
 
-    with station_order_tab:
-        st.info(
-            "Station metrics and charging orders will appear after clicking Run Scheduler."
-        )
-
-    with other_metrics_tab:
-        st.info(
-            "Additional metrics and Excel download will appear after clicking Run Scheduler."
-        )
-
-    st.stop()
-
-
-max_solve_time = SOLVER_CONFIG["max_solve_time_seconds"]
-
-
-dynamic_failures = get_dynamic_failures()
-reoptimization_enabled = REOPTIMIZATION_CONFIG.get(
-    "enabled",
-    False,
+current_run_key = {"scenario": selected_scenario_name, "weights": ui_weights}
+has_cached = (
+    st.session_state.get("result") is not None
+    and st.session_state.get("run_key") == current_run_key
 )
+should_run = run_scheduler or not has_cached
 
-if should_run_scheduler:
-    optimizer_message = summary_loading_placeholder
-    st.session_state["scheduler_is_running"] = True
-
-    with station_loading_placeholder.container():
-        st.info(
-            "Station charging orders are being recalculated for the selected scenario."
+if should_run:
+    loader = summary_tab.empty()
+    with loader.container():
+        render_optimizer_loader(
+            f"CP-SAT is solving the selected scenario. Maximum solve time is {SOLVER['max_seconds']} seconds."
         )
-
-    with metrics_loading_placeholder.container():
-        st.info(
-            "Other metrics and the Excel download will appear after the fresh optimization run completes."
-        )
-
-    try:
-        if reoptimization_enabled and dynamic_failures:
-            with optimizer_message.status(
-                "Event-driven CP-SAT run in progress...",
-                expanded=True,
-            ) as run_status:
-                render_optimizer_loader(
-                    "Building the initial CP-SAT schedule. Dynamic failures will be injected when their configured time is reached."
-                )
-
-                st.write(
-                    "Phase 1: Building the initial CP-SAT schedule without dynamic failures."
-                )
-
-                for failure in dynamic_failures:
-                    st.write(
-                        f"Queued dynamic failure: {failure.get('type')} "
-                        f"at {failure.get('start_time')} "
-                        f"for Station {failure.get('station_id')}."
-                    )
-
-                scheduler = BusChargingScheduler(
-                    scenario_path=str(selected_scenario_path),
-                    ui_weights=ui_weights,
-                )
-
-                result = scheduler.solve(
-                    include_timeline=False,
-                )
-
-                if result.get("reoptimization_summary"):
-                    for phase in result["reoptimization_summary"].get("phases", []):
-                        triggered_failure = phase.get("triggered_failure")
-
-                        if triggered_failure:
-                            st.write(
-                                f"Injected {triggered_failure.get('type')} "
-                                f"at {phase.get('trigger_time')} "
-                                f"and re-ran CP-SAT for the remaining schedule."
-                            )
-
-                    run_status.update(
-                        label="Event-driven CP-SAT re-optimization completed.",
-                        state="complete",
-                        expanded=True,
-                    )
-                else:
-                    run_status.update(
-                        label="CP-SAT completed. No dynamic failure injection was triggered.",
-                        state="complete",
-                        expanded=True,
-                    )
-        else:
-            with optimizer_message:
-                render_optimizer_loader(
-                    f"CP-SAT is solving the selected scenario. Maximum solve time is {max_solve_time} seconds."
-                )
-
-                scheduler = BusChargingScheduler(
-                    scenario_path=str(selected_scenario_path),
-                    ui_weights=ui_weights,
-                )
-
-                result = scheduler.solve(
-                    include_timeline=False,
-                )
-
-        st.session_state["scheduler_result"] = result
-        st.session_state["scheduler_run_key"] = current_run_key
-        st.session_state["scheduler_is_running"] = False
-        optimizer_message.empty()
-        summary_loading_placeholder.empty()
-        station_loading_placeholder.empty()
-        metrics_loading_placeholder.empty()
-
-    except ValueError as error:
-        st.session_state["scheduler_is_running"] = False
-        optimizer_message.empty()
-        station_loading_placeholder.empty()
-        metrics_loading_placeholder.empty()
-        st.error(str(error))
-        st.stop()
+    with st.spinner("Solving..."):
+        result = Reoptimizer.run(scenario)
+    loader.empty()
+    st.session_state["result"] = result
+    st.session_state["run_key"] = current_run_key
 else:
-    result = st.session_state["scheduler_result"]
+    result = st.session_state["result"]
 
 
 if result["status"] == "NO_SOLUTION":
-    st.error(result["message"])
+    st.error("No feasible charging schedule found.")
     st.stop()
 
-
-summary = result["summary"]
-
-journey_times = [
-    calculate_journey_minutes(
-        bus["departure_time"],
-        bus["final_arrival_time"],
-    )
-    for bus in result["bus_timetables"]
-]
-
-max_journey_time = max(journey_times) if journey_times else 0
+summary = build_summary(result)
 
 
 with summary_tab:
-    if result.get("reoptimization_summary"):
-        dynamic_failures_processed = result["reoptimization_summary"].get(
-            "dynamic_failures_processed",
-            0,
-        )
-
+    if len(result.get("phases", [])) > 1:
         st.warning(
-            f"Dynamic failure injection was triggered during the run. "
-            f"Processed dynamic failures: {dynamic_failures_processed}. "
-            "Open the Other Metrics tab to see the event-driven re-optimization trace."
+            "Dynamic failure injection was triggered during the run. "
+            "Open the Other Metrics tab to see the re-optimization trace."
         )
 
     st.subheader("Summary Metrics")
 
     col1, col2, col3, col4 = st.columns(4)
-
-    col1.metric(
-        "Total Buses",
-        summary["total_buses"],
-    )
-
-    col2.metric(
-        "Total Wait",
-        f"{summary['total_wait_minutes']} min",
-    )
-
-    col3.metric(
-        "Avg Wait / Bus",
-        f"{summary['average_wait_per_bus']} min",
-    )
-
-    col4.metric(
-        "Max Bus Wait",
-        f"{summary['max_bus_wait_minutes']} min",
-    )
+    col1.metric("Total Buses", summary["total_buses"])
+    col2.metric("Total Wait", f"{summary['total_wait']} min")
+    col3.metric("Avg Wait / Bus", f"{summary['average_wait']} min")
+    col4.metric("Max Bus Wait", f"{summary['max_wait']} min")
 
     col5, col6, col7, col8 = st.columns(4)
-
-    col5.metric(
-        "Buses With Wait",
-        summary["buses_with_wait"],
-        delta=f"{summary['buses_with_wait_percent']}%",
-    )
-
-    col6.metric(
-        "Charging Stops",
-        summary["total_charging_stops"],
-    )
-
-    col7.metric(
-        "Avg Stops / Bus",
-        summary["average_charging_stops_per_bus"],
-    )
-
-    col8.metric(
-        "Max Journey Time",
-        f"{max_journey_time} min",
-    )
-
+    col5.metric("Buses With Wait", summary["buses_with_wait"], delta=f"{summary['buses_with_wait_percent']}%")
+    col6.metric("Charging Stops", summary["total_stops"])
+    col7.metric("Avg Stops / Bus", summary["average_stops"])
+    col8.metric("Max Journey Time", f"{summary['max_journey']} min")
     col8.markdown(
         "<div class='metric-note'>Includes travel + charging + wait time</div>",
         unsafe_allow_html=True,
     )
 
     st.subheader("Bus Timetable")
-
-    st.dataframe(
-        pd.DataFrame(build_bus_rows(result)),
-        use_container_width=True,
-        hide_index=True,
-    )
+    st.dataframe(pd.DataFrame(build_bus_rows(result)), use_container_width=True, hide_index=True)
 
     st.subheader("Per-Bus Charging Details")
-
-    for bus in result["bus_timetables"]:
-        with st.expander(
-            f"{bus['bus_id']} | {bus['operator_id']}"
-        ):
-            charging_events_df = pd.DataFrame(
-                bus["charging_events"],
-            )
-
-            if not charging_events_df.empty:
-                st.dataframe(
-                    charging_events_df,
-                    use_container_width=True,
-                    hide_index=True,
-                )
+    for bus in result["buses"]:
+        with st.expander(f"{bus['bus_id']} | {bus['operator_id']}"):
+            charges_df = pd.DataFrame([
+                {
+                    "Station": charge["station"],
+                    "Reached": charge["reached"],
+                    "Charge Start": charge["charge_start"],
+                    "Charge End": charge["charge_end"],
+                    "Wait Minutes": charge["wait_minutes"],
+                }
+                for charge in bus["charges"]
+            ])
+            if not charges_df.empty:
+                st.dataframe(charges_df, use_container_width=True, hide_index=True)
             else:
                 st.info("This bus has no charging events.")
 
 
 with station_order_tab:
     st.subheader("Station Metrics")
-
-    st.dataframe(
-        pd.DataFrame(build_station_rows(summary)),
-        use_container_width=True,
-        hide_index=True,
-    )
+    st.dataframe(pd.DataFrame(build_station_rows(result)), use_container_width=True, hide_index=True)
 
     st.subheader("Station Charging Orders")
-
-    station_ids = list(
-        result["station_charging_orders"].keys()
-    )
-
-    if station_ids:
-        station_tabs = st.tabs([
-            f"Station {station_id}"
-            for station_id in station_ids
-        ])
-
-        for tab, station_id in zip(station_tabs, station_ids):
-            with tab:
-                station_order_df = pd.DataFrame(
-                    result["station_charging_orders"][station_id],
-                )
-
-                st.dataframe(
-                    station_order_df,
-                    use_container_width=True,
-                    hide_index=True,
-                )
-    else:
-        st.info("No station charging orders available.")
+    station_ids = list(STATIONS.keys())
+    station_tabs = st.tabs([f"Station {station_id}" for station_id in station_ids])
+    for tab, station_id in zip(station_tabs, station_ids):
+        with tab:
+            sessions = result["stations"].get(station_id, [])
+            station_df = pd.DataFrame([
+                {
+                    "Order": index + 1,
+                    "Bus ID": event["bus_id"],
+                    "Operator": event["operator_id"],
+                    "Charge Start": event["charge_start"],
+                    "Charge End": event["charge_end"],
+                    "Wait Minutes": event["wait_minutes"],
+                }
+                for index, event in enumerate(sessions)
+            ])
+            if not station_df.empty:
+                st.dataframe(station_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("No buses charged at this station.")
 
 
 with other_metrics_tab:
     st.subheader("Simulation Window")
-
-    simulation_window_df = pd.DataFrame([
-        {
-            "Start Time": summary["simulation_start_time"],
-            "End Time": summary["simulation_end_time"],
-            "Duration Minutes": summary["simulation_duration_minutes"],
-        }
-    ])
-
     st.dataframe(
-        simulation_window_df,
+        pd.DataFrame([{
+            "Start Time": summary["start_time"],
+            "End Time": summary["end_time"],
+            "Duration Minutes": summary["duration"],
+        }]),
         use_container_width=True,
         hide_index=True,
     )
 
     st.subheader("Optimization Weights Used")
-
-    weight_rows = [
-        {
-            "Weight": key,
-            "Value": value,
-        }
-        for key, value in result["optimization_weights"].items()
-    ]
-
     st.dataframe(
-        pd.DataFrame(weight_rows),
+        pd.DataFrame([{"Weight": key, "Value": value} for key, value in result["weights"].items()]),
         use_container_width=True,
         hide_index=True,
     )
 
     st.subheader("Configured Dynamic Failures")
-
-    dynamic_failure_rows = build_dynamic_failure_rows()
-
-    if dynamic_failure_rows:
-        st.dataframe(
-            pd.DataFrame(dynamic_failure_rows),
-            use_container_width=True,
-            hide_index=True,
-        )
+    dynamic_rows = build_dynamic_failure_rows()
+    if dynamic_rows:
+        st.dataframe(pd.DataFrame(dynamic_rows), use_container_width=True, hide_index=True)
     else:
         st.info("No dynamic failures configured. CHARGER_DOWN and SLOW_CHARGING trigger event-driven re-optimization.")
 
-    render_reoptimization_timeline(result)
+    render_reoptimization_trace(result)
 
     st.subheader("Operator Metrics")
-
-    st.dataframe(
-        pd.DataFrame(build_operator_rows(summary)),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    excel_file = build_cached_excel_report(result)
+    st.dataframe(pd.DataFrame(build_operator_rows(result)), use_container_width=True, hide_index=True)
 
     st.download_button(
         label="Download Excel Report",
-        data=excel_file,
+        data=Report.to_excel(result),
         file_name=f"{result['scenario_id']}_scheduler_report.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
