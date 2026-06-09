@@ -1,36 +1,35 @@
-class TimeUtilities:
-    @staticmethod
-    def _time_to_minutes(time_text) -> object:
-        """Convert or compare schedule time values.
-        
-        Args:
-            time_text (str): Time value in HH:MM format.
-        """
-        hour, minute = map(int, time_text.split(":"))
-        return hour * 60 + minute
+"""Conversions between 'HH:MM' clock strings and integer minutes.
+
+The whole engine works in minutes past midnight, which keeps the arithmetic
+simple. These helpers translate to and from the clock strings used in the
+scenario files and the UI.
+"""
+
+
+class TimeUtils:
+    """Stateless time-format helpers."""
 
     @staticmethod
-    def _minutes_to_time(minutes) -> str:
-        """Convert or compare schedule time values.
-        
+    def to_minutes(clock):
+        """Convert a 'HH:MM' clock string to minutes past midnight.
+
         Args:
-            minutes (_type_): Minutes used by this function.
+            clock (str): Time of day in 24-hour 'HH:MM' format.
+
+        Returns:
+            int: Minutes elapsed since 00:00.
         """
-        hour = (minutes // 60) % 24
-        minute = minutes % 60
-        return f"{hour:02d}:{minute:02d}"
+        hours, minutes = clock.split(":")
+        return int(hours) * 60 + int(minutes)
 
     @staticmethod
-    def _time_to_minutes_after(time_text, minimum_minute) -> object:
-        """Convert or compare schedule time values.
-        
+    def to_clock(minutes):
+        """Convert minutes past midnight to a 'HH:MM' string.
+
         Args:
-            time_text (str): Time value in HH:MM format.
-            minimum_minute (_type_): Minimum minute represented in minutes.
+            minutes (int): Minutes since 00:00 (may exceed a day).
+
+        Returns:
+            str: Time formatted as 24-hour 'HH:MM'.
         """
-        candidate_minute = TimeUtilities._time_to_minutes(time_text)
-
-        while candidate_minute < minimum_minute:
-            candidate_minute += 24 * 60
-
-        return candidate_minute
+        return f"{(minutes // 60) % 24:02d}:{minutes % 60:02d}"
