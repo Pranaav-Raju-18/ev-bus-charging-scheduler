@@ -11,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from Backend.configurations import (
+from Backend.config import (
     BATTERY_RANGE_KM,
     CHARGE_MINUTES,
     SPEED_KMPH,
@@ -25,9 +25,9 @@ from Backend.configurations import (
     PLANNED_FAILURE_TYPES,
     DYNAMIC_FAILURE_TYPES,
 )
-from Backend.scenario_loader import Scenario
-from Backend.reoptimization_runner import Reoptimizer
-from Backend.report_generator import Report
+from Backend.scenario import Scenario
+from Backend.reoptimizer import Reoptimizer
+from Backend.report import Report
 
 SCENARIO_FOLDER = Path("Backend/scenarios")
 
@@ -702,12 +702,11 @@ with input_data_tab:
 
 # --- Run -------------------------------------------------------------------
 
-current_run_key = {"scenario": selected_scenario_name, "weights": ui_weights}
-has_cached = (
-    st.session_state.get("result") is not None
-    and st.session_state.get("run_key") == current_run_key
-)
-should_run = run_scheduler or not has_cached
+# Auto-run on first open or when the scenario changes. Moving the weight
+# sliders does NOT trigger a solve - the new weights apply only when the user
+# clicks Run Scheduler.
+scenario_changed = st.session_state.get("run_scenario") != selected_scenario_name
+should_run = run_scheduler or scenario_changed
 
 if should_run:
     loader = summary_tab.empty()
@@ -719,9 +718,12 @@ if should_run:
         result = Reoptimizer.run(scenario)
     loader.empty()
     st.session_state["result"] = result
-    st.session_state["run_key"] = current_run_key
+    st.session_state["run_scenario"] = selected_scenario_name
+    st.session_state["run_weights"] = dict(ui_weights)
 else:
     result = st.session_state["result"]
+
+weights_changed = (not should_run) and ui_weights != st.session_state.get("run_weights")
 
 
 if result["status"] == "NO_SOLUTION":
@@ -732,6 +734,12 @@ summary = build_summary(result)
 
 
 with summary_tab:
+    if weights_changed:
+        st.info(
+            "Weights changed. Click Run Scheduler in the sidebar to re-optimize. "
+            "The results below still use the last run's weights."
+        )
+
     if len(result.get("phases", [])) > 1:
         st.warning(
             "Dynamic failure injection was triggered during the run. "
