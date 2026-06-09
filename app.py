@@ -11,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from Backend.config import (
+from Backend.configurations import (
     BATTERY_RANGE_KM,
     CHARGE_MINUTES,
     SPEED_KMPH,
@@ -25,9 +25,9 @@ from Backend.config import (
     PLANNED_FAILURE_TYPES,
     DYNAMIC_FAILURE_TYPES,
 )
-from Backend.scenario import Scenario
-from Backend.reoptimizer import Reoptimizer
-from Backend.report import Report
+from Backend.scenario_loader import Scenario
+from Backend.reoptimization_runner import Reoptimizer
+from Backend.report_generator import Report
 
 SCENARIO_FOLDER = Path("Backend/scenarios")
 
