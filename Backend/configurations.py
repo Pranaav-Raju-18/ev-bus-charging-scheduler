@@ -1,107 +1,110 @@
-"""Configuration values for routes, chargers, operators, failures, and solver settings."""
+"""System-level configuration for the bus charging scheduler.
 
-CHARGER_CONFIG = {
-    "charging_duration_minutes": 25,
-    "charging_policy": "charge_to_full",
-    "charger_setup_duration_minutes": 0,
-}
+Everything that describes the fixed world lives here: the route, the charging
+stations, the operators, the battery limits, the optimization weights, the
+solver budget and the optional operational failures.
 
-BUS_CONFIG = {
-    "maximum_range_km": 240,
-    "speed_kmph": 60,
-    "initial_range_km": 240,
-    "minimum_required_range_km": 0,
-}
+Design rule: growing or tuning the world (more buses, stations, chargers,
+operators, routes, different distances or weights) should be an edit in this
+file or in a scenario JSON, never a change to the engine code.
+"""
 
-OPTIMIZATION_WEIGHTS = {
-    "individual_wait_weight": 1.0,
-    "operator_fairness_weight": 1.0,
-    "network_wait_weight": 1.0,
-}
+# --- Physical constants ----------------------------------------------------
 
-SOLVER_CONFIG = {
-    "max_solve_time_seconds": 60,
-    "num_search_workers": 8,
-    "random_seed": 42,
-    "log_search_progress": False,
-}
+BATTERY_RANGE_KM = 240   # how far a bus can drive on a full charge
+CHARGE_MINUTES = 25      # time to charge back to full (fixed)
+SPEED_KMPH = 60          # constant speed, so 1 km takes 1 minute
 
-ROUTES_CONFIG = [
-    {
-        "route_id": "route_01",
-        "station_sequence": ["Bengaluru", "A", "B", "C", "D", "Kochi"],
-        "station_distances_in_km": [
-            {"from_station": "Bengaluru", "to_station": "A", "distance_km": 100},
-            {"from_station": "A", "to_station": "B", "distance_km": 120},
-            {"from_station": "B", "to_station": "C", "distance_km": 100},
-            {"from_station": "C", "to_station": "D", "distance_km": 120},
-            {"from_station": "D", "to_station": "Kochi", "distance_km": 100},
-        ],
+# --- Route(s) --------------------------------------------------------------
+# Each route is an ordered list of stops plus the distance of every segment
+# between consecutive stops. The two endpoints are start/finish only; the
+# inner stops that also appear in STATIONS are the ones with chargers.
+
+ROUTES = {
+    "route_01": {
+        "name": "Bengaluru to Kochi",
+        "stops": ["Bengaluru", "A", "B", "C", "D", "Kochi"],
+        "segment_km": [100, 120, 100, 120, 100],
     },
-    {
-        "route_id": "route_02",
-        "station_sequence": ["Kochi", "D", "C", "B", "A", "Bengaluru"],
-        "station_distances_in_km": [
-            {"from_station": "Kochi", "to_station": "D", "distance_km": 100},
-            {"from_station": "D", "to_station": "C", "distance_km": 120},
-            {"from_station": "C", "to_station": "B", "distance_km": 100},
-            {"from_station": "B", "to_station": "A", "distance_km": 120},
-            {"from_station": "A", "to_station": "Bengaluru", "distance_km": 100},
-        ],
+    "route_02": {
+        "name": "Kochi to Bengaluru",
+        "stops": ["Kochi", "D", "C", "B", "A", "Bengaluru"],
+        "segment_km": [100, 120, 100, 120, 100],
     },
-]
-
-STATIONS_CONFIG = [
-    {"station_id": "A", "station_name": "Station A", "charger_count": 1},
-    {"station_id": "B", "station_name": "Station B", "charger_count": 1},
-    {"station_id": "C", "station_name": "Station C", "charger_count": 1},
-    {"station_id": "D", "station_name": "Station D", "charger_count": 1},
-]
-
-OPERATORS_CONFIG = [
-    {"operator_id": "kpn", "operator_name": "KPN"},
-    {"operator_id": "flixbus", "operator_name": "Flixbus"},
-    {"operator_id": "freshbus", "operator_name": "Freshbus"},
-]
-
-OPERATIONAL_FAILURE_SETTINGS = {
-    "include_operational_failures": False,
 }
 
-OPERATIONAL_FAILURES = [
+# --- Charging stations -----------------------------------------------------
+# Only these stops have chargers. Change "chargers" to add capacity.
+
+STATIONS = {
+    "A": {"chargers": 1},
+    "B": {"chargers": 1},
+    "C": {"chargers": 1},
+    "D": {"chargers": 1},
+}
+
+# --- Operators -------------------------------------------------------------
+
+OPERATORS = {
+    "kpn": "KPN",
+    "freshbus": "Freshbus",
+    "flixbus": "Flixbus",
+}
+
+# --- Optimization weights (tunable) ---------------------------------------
+# The three soft rules from the brief. Higher value = more important.
+# Override per scenario in the scenario JSON, or live from the UI sliders.
+
+WEIGHTS = {
+    "individual": 1.0,   # keep the single worst bus wait low
+    "operator": 1.0,     # keep operators' total waits balanced
+    "network": 1.0,      # keep the whole fleet's total wait low
+}
+
+# --- Solver settings -------------------------------------------------------
+
+SOLVER = {
+    "max_seconds": 30,   # time budget per solve
+    "workers": 8,        # parallel search workers
+}
+
+# --- Operational failures (optional) --------------------------------------
+# Real-world disruptions. Disabled by default so the base scenarios stay
+# clean. Enable to see the scheduler plan around (and re-optimize for) them.
+
+FAILURES_ENABLED = False
+
+FAILURES = [
     {
-        "operational_failure_id": "failure-001",
+        "id": "failure-001",
         "type": "STATION_CAPACITY_REDUCTION",
-        "station_id": "B",
-        "start_time": "20:00",
-        "end_time": "22:00",
+        "station": "B",
         "available_chargers": 0,
-        "reason": "Only 1 charger is available at Station B due to maintenance",
+        "start": "20:00",
+        "end": "22:00",
+        "reason": "Maintenance reduces chargers at Station B",
     },
     {
-        "operational_failure_id": "failure-002",
+        "id": "failure-002",
         "type": "CHARGER_DOWN",
-        "station_id": "D",
-        "charger_id": "D-1",
-        "start_time": "02:00",
-        "end_time": "03:30",
-        "reason": "Specific charger D-1 is down due to communication failure",
+        "station": "D",
+        "start": "21:00",
+        "end": "22:30",
+        "reason": "A charger at Station D is offline",
     },
     {
-        "operational_failure_id": "failure-003",
+        "id": "failure-003",
         "type": "SLOW_CHARGING",
-        "station_id": "D",
-        "start_time": "21:00",
-        "end_time": "23:00",
-        "charging_duration_minutes": 40,
-        "affected_chargers": 1,
-        "reason": "Voltage drop at Station D increases charging time",
+        "station": "D",
+        "slow_minutes": 40,
+        "start": "21:00",
+        "end": "23:00",
+        "reason": "Voltage drop at Station D slows charging",
     },
 ]
 
-
-REOPTIMIZATION_CONFIG = {
-    "enable_event_driven_reoptimization": True,
-    "planned_failure_types": ["STATION_CAPACITY_REDUCTION"],
-    "dynamic_failure_types": ["CHARGER_DOWN", "SLOW_CHARGING"],
-}
+# Planned failures are known up front and go into the first solve. Dynamic
+# Dynamic failures behave like surprises: the scheduler plans without them, 
+# then re-optimizes the remaining schedule when each one's start time is reached.
+PLANNED_FAILURE_TYPES = ["STATION_CAPACITY_REDUCTION"]
+DYNAMIC_FAILURE_TYPES = ["CHARGER_DOWN", "SLOW_CHARGING"]
