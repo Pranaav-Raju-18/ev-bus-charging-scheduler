@@ -1,135 +1,100 @@
-"""Operational failures: how disruptions affect the chargers.
+"""Event-driven re-optimization for dynamic operational failures.
 
-Failures are optional (config.FAILURES_ENABLED). They come in two flavours:
-  * capacity loss - STATION_CAPACITY_REDUCTION / CHARGER_DOWN make fewer
-    chargers usable during a window; modelled as a block on the station,
-  * slow charging - SLOW_CHARGING makes charging at a station take longer
-    while the failure is active.
+Flow:
+  1. Solve once with only the planned failures (known up front).
+  2. For each dynamic failure, in time order: when its start time is reached,
+     freeze every decision already made before then and re-solve the rest with
+     that failure now active.
 
-Planned failures are known up front and enter the first solve. Dynamic
-failures are treated as surprises and trigger re-optimization.
+The core Scheduler is reused unchanged; only its inputs (active failures and
+frozen decisions) differ between phases. With failures disabled this collapses
+to a single normal solve.
 """
 
-from Backend.configurations import (
-    CHARGE_MINUTES,
-    STATIONS,
-    FAILURES,
-    FAILURES_ENABLED,
-    PLANNED_FAILURE_TYPES,
-    DYNAMIC_FAILURE_TYPES,
-)
+from Backend.failure_handler import Failures
+from Backend.scheduler import Scheduler
 from Backend.time_utils import TimeUtils
 
 
-class Failures:
-    """Stateless helpers that interpret the configured failure list."""
+class Reoptimizer:
+    """Runs the initial solve plus a re-solve per dynamic failure."""
 
     @staticmethod
-    def all():
-        """All configured failures, or none if failures are disabled.
-
-        Returns:
-            list[dict]: Failure definitions (see config.FAILURES).
-        """
-        return list(FAILURES) if FAILURES_ENABLED else []
-
-    @staticmethod
-    def window(failure):
-        """Start and end of a failure in minutes past midnight.
+    def run(scenario):
+        """Produce a schedule, re-optimizing for each dynamic failure.
 
         Args:
-            failure (dict): A failure with 'start' and 'end' clock strings.
+            scenario (Scenario): The scenario to schedule.
 
         Returns:
-            tuple[int, int]: (start_minute, end_minute); end rolls to the next
-                day if it is not after start.
+            dict: The final schedule (same shape as Scheduler.solve) plus a
+                'phases' list describing each solve step.
         """
-        start = TimeUtils.to_minutes(failure["start"])
-        end = TimeUtils.to_minutes(failure["end"])
-        if end <= start:
-            end += 24 * 60
-        return start, end
+        active = Failures.all()
+        planned = Failures.planned(active)
+        dynamic = Failures.dynamic(active)
+
+        result = Scheduler(scenario, active_failures=planned).solve()
+        phases = [Reoptimizer._phase("initial", None, None, result)]
+
+        applied = list(planned)
+        for failure in dynamic:
+            if result["status"] == "NO_SOLUTION":
+                break
+            trigger, _ = Failures.window(failure)
+            applied.append(failure)
+            frozen = Reoptimizer._freeze(result, trigger)
+            result = Scheduler(scenario, active_failures=applied, frozen=frozen).solve()
+            phases.append(Reoptimizer._phase("reoptimized", trigger, failure, result))
+
+        result["phases"] = phases
+        return result
 
     @staticmethod
-    def planned(active):
-        """Failures known in advance (folded into the first solve).
+    def _phase(name, trigger, failure, result):
+        """Summarize one solve step for the UI.
 
         Args:
-            active (list[dict]): Failure definitions to split.
+            name (str): 'initial' or 'reoptimized'.
+            trigger (int | None): Minute the re-solve was triggered, if any.
+            failure (dict | None): The failure that triggered the re-solve.
+            result (dict): The schedule produced by this step.
 
         Returns:
-            list[dict]: Failures whose type is in PLANNED_FAILURE_TYPES.
+            dict: A compact phase summary.
         """
-        return [f for f in active if f["type"] in PLANNED_FAILURE_TYPES]
+        return {
+            "phase": name,
+            "trigger_time": TimeUtils.to_clock(trigger) if trigger is not None else None,
+            "failure_id": failure["id"] if failure else None,
+            "failure_type": failure["type"] if failure else None,
+            "status": result["status"],
+            "total_wait_minutes": result["total_wait_minutes"],
+        }
 
     @staticmethod
-    def dynamic(active):
-        """Failures treated as runtime surprises, ordered by start time.
+    def _freeze(result, freeze_minute):
+        """Capture decisions that happen before the freeze time.
 
         Args:
-            active (list[dict]): Failure definitions to split.
+            result (dict): The latest schedule.
+            freeze_minute (int): Minute at which the new failure begins.
 
         Returns:
-            list[dict]: Failures whose type is in DYNAMIC_FAILURE_TYPES,
-                sorted by start minute.
+            dict: Per-bus committed decisions keyed by bus_id.
         """
-        dynamic = [f for f in active if f["type"] in DYNAMIC_FAILURE_TYPES]
-        return sorted(dynamic, key=lambda f: Failures.window(f)[0])
-
-    @staticmethod
-    def blocked_chargers(failure):
-        """How many chargers a capacity failure removes.
-
-        Args:
-            failure (dict): A failure definition.
-
-        Returns:
-            int: Chargers made unavailable (0 if not a capacity failure).
-        """
-        if failure["type"] == "CHARGER_DOWN":
-            return 1
-        if failure["type"] == "STATION_CAPACITY_REDUCTION":
-            configured = STATIONS[failure["station"]]["chargers"]
-            return max(0, configured - failure["available_chargers"])
-        return 0
-
-    @staticmethod
-    def capacity_blocks(active, station):
-        """Blocking intervals at a station from active capacity failures.
-
-        Args:
-            active (list[dict]): Currently active failures.
-            station (str): Station id to filter on.
-
-        Returns:
-            list[tuple[int, int, int]]: (start_minute, end_minute,
-                chargers_blocked) for each capacity failure at this station.
-        """
-        blocks = []
-        for failure in active:
-            if failure.get("station") != station:
+        frozen = {}
+        for bus in result["buses"]:
+            if bus["departure_minute"] > freeze_minute:
                 continue
-            blocked = Failures.blocked_chargers(failure)
-            if blocked > 0:
-                start, end = Failures.window(failure)
-                blocks.append((start, end, blocked))
-        return blocks
-
-    @staticmethod
-    def charge_minutes(active, station):
-        """Charging time at a station, accounting for slow charging.
-
-        While a SLOW_CHARGING failure is active at a station, charges there
-        take the slow duration. Otherwise the normal CHARGE_MINUTES applies.
-
-        Args:
-            active (list[dict]): Currently active failures.
-            station (str): Station id being charged at.
-
-        Returns:
-            int: Charging duration in minutes for this station.
-        """
-        for failure in active:
-            if failure["type"] == "SLOW_CHARGING" and failure["station"] == station:
-                return failure["slow_minutes"]
-        return CHARGE_MINUTES
+            started = [
+                {"station": charge["station"], "start": charge["start_minute"]}
+                for charge in bus["charges"]
+                if charge["start_minute"] < freeze_minute
+            ]
+            frozen[bus["bus_id"]] = {
+                "plan": bus["plan"],
+                "events": started,
+                "freeze_minute": freeze_minute,
+            }
+        return frozen
