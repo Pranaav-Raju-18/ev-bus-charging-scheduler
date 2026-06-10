@@ -146,7 +146,14 @@ class Scheduler:
         return events, sum(wait_terms)
 
     def _apply_frozen(self, bus_id):
-        """Pin a bus's already-committed decisions during re-optimization.
+        """Re-apply a bus's committed decisions during re-optimization.
+
+        The frozen record (see Reoptimizer._freeze) pins only the *prefix* of the
+        bus's plan to the stations it has already committed to, fixes the start
+        times of charges that already happened, and forces every remaining charge
+        to begin only after the failure has cleared. Plans that do not match the
+        committed prefix are ruled out, so the bus keeps its past but is free to
+        re-route and re-time the rest of its journey.
 
         Args:
             bus_id (str): Bus identifier.
@@ -155,14 +162,17 @@ class Scheduler:
         if not commit:
             return
 
+        pinned = commit["pinned_stations"]
+        fixed = commit["fixed_events"]
+
         for option in self.options[bus_id]:
-            if option["plan"] != commit["plan"]:
+            if option["plan"][:len(pinned)] != pinned:
+                self.model.Add(option["pick"] == 0)
                 continue
-            self.model.Add(option["pick"] == 1)
-            for event, fixed in zip(option["events"], commit["events"]):
-                self.model.Add(event["start"] == fixed["start"])
-            for event in option["events"][len(commit["events"]):]:
-                self.model.Add(event["start"] >= commit["freeze_minute"])
+            for index, event in enumerate(fixed):
+                self.model.Add(option["events"][index]["start"] == event["start"])
+            for event in option["events"][len(fixed):]:
+                self.model.Add(event["start"] >= commit["future_min_start"])
 
     def _block_failed_chargers(self):
         """Add fixed blocking intervals for active capacity failures."""
