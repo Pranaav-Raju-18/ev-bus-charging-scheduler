@@ -11,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from Backend.configurations import (
+from Backend.config import (
     BATTERY_RANGE_KM,
     CHARGE_MINUTES,
     SPEED_KMPH,
@@ -25,9 +25,9 @@ from Backend.configurations import (
     PLANNED_FAILURE_TYPES,
     DYNAMIC_FAILURE_TYPES,
 )
-from Backend.scenario_loader import Scenario
-from Backend.reoptimization_runner import Reoptimizer
-from Backend.report_generator import Report
+from Backend.scenario import Scenario
+from Backend.reoptimizer import Reoptimizer
+from Backend.report import Report
 
 SCENARIO_FOLDER = Path("Backend/scenarios")
 
@@ -329,7 +329,7 @@ st.markdown(
             left: -52px;
             bottom: 0;
             font-size: 1.7rem;
-            animation: busMove 60s linear 1 forwards;
+            animation: busMove 30s linear 1 forwards;
         }
 
         .charger-node {
@@ -647,10 +647,10 @@ else:
 
 # --- Tabs ------------------------------------------------------------------
 
-input_data_tab, summary_tab, station_order_tab, other_metrics_tab = st.tabs([
-    "Input Data Structure",
+summary_tab, station_order_tab, input_data_tab, other_metrics_tab = st.tabs([
     "Summary & Bus Timetable",
     "Station Charging Orders",
+    "Input Data Structure",
     "Other Metrics",
 ])
 
