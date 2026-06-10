@@ -14,6 +14,7 @@ to a single normal solve.
 from Backend.failure_handler import Failures
 from Backend.scheduler import Scheduler
 from Backend.time_utils import TimeUtils
+from Backend.event_queue import charge_duration
 
 
 class Reoptimizer:
@@ -42,10 +43,16 @@ class Reoptimizer:
             if result["status"] == "NO_SOLUTION":
                 break
             trigger, _ = Failures.window(failure)
+            frozen = Reoptimizer._freeze(result, failure)
+            candidate = Scheduler(
+                scenario, active_failures=applied + [failure], frozen=frozen).solve()
+            phases.append(Reoptimizer._phase("reoptimized", trigger, failure, candidate))
+
+            if candidate["status"] == "NO_SOLUTION":
+                # This failure could not be absorbed; keep the last feasible plan.
+                break
             applied.append(failure)
-            frozen = Reoptimizer._freeze(result, trigger)
-            result = Scheduler(scenario, active_failures=applied, frozen=frozen).solve()
-            phases.append(Reoptimizer._phase("reoptimized", trigger, failure, result))
+            result = candidate
 
         result["phases"] = phases
         return result
@@ -73,28 +80,68 @@ class Reoptimizer:
         }
 
     @staticmethod
-    def _freeze(result, freeze_minute):
-        """Capture decisions that happen before the freeze time.
+    def _freeze(result, failure):
+        """Capture each bus's committed decisions when a failure triggers.
+
+        A bus keeps the charges it has already finished, and any charge in
+        progress at a station other than the failed one. The single bus that is
+        mid-charge at the failed station when a CHARGER_DOWN hits stays pinned to
+        that station but is held until the charger returns - it "pauses there"
+        and charges once the charger is back online. Everything a bus has not yet
+        started is left free, so the solver can re-route and re-time it around
+        the failure.
 
         Args:
             result (dict): The latest schedule.
-            freeze_minute (int): Minute at which the new failure begins.
+            failure (dict): The failure being injected (carries its type,
+                station and time window).
 
         Returns:
-            dict: Per-bus committed decisions keyed by bus_id.
+            dict: Per-bus committed decisions keyed by bus_id, each with the
+                pinned plan prefix, the fixed charge starts and the earliest
+                minute any remaining charge may begin.
         """
+        station = failure.get("station")
+        charger_down = failure.get("type") == "CHARGER_DOWN"
+        window_start, window_end = Failures.window(failure)
+
         frozen = {}
         for bus in result["buses"]:
-            if bus["departure_minute"] > freeze_minute:
+            if bus["departure_minute"] > window_start:
                 continue
-            started = [
-                {"station": charge["station"], "start": charge["start_minute"]}
-                for charge in bus["charges"]
-                if charge["start_minute"] < freeze_minute
-            ]
-            frozen[bus["bus_id"]] = {
-                "plan": bus["plan"],
-                "events": started,
-                "freeze_minute": freeze_minute,
-            }
+
+            pinned_stations = []
+            fixed_events = []
+            future_min_start = window_start
+
+            for charge in bus["charges"]:
+                start = charge["start_minute"]
+                end = start + charge_duration(charge["charge_start"], charge["charge_end"])
+
+                if end <= window_start:
+                    # Charge already finished - committed, cannot be undone.
+                    pinned_stations.append(charge["station"])
+                    fixed_events.append({"station": charge["station"], "start": start})
+                    continue
+
+                if start < window_start:
+                    # Charge in progress when the failure hits.
+                    pinned_stations.append(charge["station"])
+                    if charger_down and charge["station"] == station:
+                        # Paused: keep the bus at this charger, but let it charge
+                        # only once the charger comes back online.
+                        future_min_start = window_end
+                    else:
+                        fixed_events.append({"station": charge["station"], "start": start})
+
+                # This charge and everything after it is re-decided.
+                break
+
+            if pinned_stations:
+                frozen[bus["bus_id"]] = {
+                    "pinned_stations": pinned_stations,
+                    "fixed_events": fixed_events,
+                    "future_min_start": future_min_start,
+                }
+
         return frozen
