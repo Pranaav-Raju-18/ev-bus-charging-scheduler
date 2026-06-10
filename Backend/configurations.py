@@ -72,10 +72,18 @@ SOLVER = {
 # Real-world disruptions. Disabled by default so the base scenarios stay
 # clean. Enable to see the scheduler plan around (and re-optimize for) them.
 
-FAILURES_ENABLED = True
+FAILURES_ENABLED = False
 
 FAILURES = [
-
+    {
+        "id": "failure-001",
+        "type": "STATION_CAPACITY_REDUCTION",
+        "station": "B",
+        "available_chargers": 0,
+        "start": "20:00",
+        "end": "22:00",
+        "reason": "Maintenance reduces chargers at Station B",
+    },
     {
         "id": "failure-002",
         "type": "CHARGER_DOWN",
@@ -83,11 +91,20 @@ FAILURES = [
         "start": "21:00",
         "end": "22:30",
         "reason": "A charger at Station D is offline",
-    }
+    },
+    {
+        "id": "failure-003",
+        "type": "SLOW_CHARGING",
+        "station": "D",
+        "slow_minutes": 40,
+        "start": "21:00",
+        "end": "23:00",
+        "reason": "Voltage drop at Station D slows charging",
+    },
 ]
 
 # Planned failures are known up front and go into the first solve. Dynamic
-# Dynamic failures behave like surprises: the scheduler plans without them, 
-# then re-optimizes the remaining schedule when each one's start time is reached.
+# failures behave like surprises: the scheduler plans without them, then
+# re-optimizes the remaining schedule when each one's start time is reached.
 PLANNED_FAILURE_TYPES = ["STATION_CAPACITY_REDUCTION"]
 DYNAMIC_FAILURE_TYPES = ["CHARGER_DOWN", "SLOW_CHARGING"]
